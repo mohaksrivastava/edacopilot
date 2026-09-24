@@ -41,6 +41,32 @@ from edacore.registry import register
 DEFAULT_ALPHA = 0.05
 
 
+def _anderson_darling_normal(x: np.ndarray) -> tuple[float, float]:
+    """(statistic, p_value) for the Anderson-Darling normality test.
+
+    scipy's `method="interpolate"` kwarg (which gives a p-value directly)
+    was added after our declared scipy floor (>=1.13 — verified against
+    the min-version CI leg, which pins exactly 1.13.0 and doesn't have
+    it). Falls back to interpolating scipy's own significance-level /
+    critical-value table for older scipy, so this works across the whole
+    declared range rather than raising the floor for one convenience
+    kwarg.
+    """
+    try:
+        result = stats.anderson(x, dist="norm", method="interpolate")
+        return float(result.statistic), float(result.pvalue)
+    except TypeError:
+        result = stats.anderson(x, dist="norm")
+        # critical_values is ascending (e.g. [0.55, 0.62, 0.74, 0.86,
+        # 1.02]); significance_level is descending (%) at the SAME
+        # indices ([15, 10, 5, 2.5, 1]) -- np.interp needs ascending xp,
+        # which critical_values already is, with fp aligned index-for-index.
+        p = float(
+            np.interp(result.statistic, result.critical_values, result.significance_level / 100)
+        )
+        return float(result.statistic), min(max(p, 0.0), 1.0)
+
+
 def _p_status(p_value: float, alpha: float = DEFAULT_ALPHA) -> CheckStatus:
     """p < alpha -> FAIL; alpha <= p < 0.10 -> BORDERLINE; else PASS (Section 6.6)."""
     if p_value < alpha:
@@ -176,7 +202,7 @@ def check_normality_anderson(
     interpolation, not R's nortest table (see module docstring)."""
     checks = []
     for level, x in _series_by(df, col, by).items():
-        result = stats.anderson(x, dist="norm", method="interpolate")
+        statistic, p_value = _anderson_darling_normal(x)
         scope = {"variable": col} | ({"group": level} if by else {})
         checks.append(
             AssumptionCheck(
@@ -184,10 +210,10 @@ def check_normality_anderson(
                 assumption="normality",
                 method="anderson_darling",
                 scope=scope,
-                statistic=float(result.statistic),
-                p_value=float(result.pvalue),
+                statistic=statistic,
+                p_value=p_value,
                 threshold="critical value at 5% significance",
-                status=_p_status(float(result.pvalue)),
+                status=_p_status(p_value),
                 consequence=(
                     "If normality fails, parametric tests that assume it may "
                     "mislead; prefer a robust or nonparametric alternative."
@@ -637,7 +663,8 @@ def _helmert_contrasts(k: int) -> np.ndarray:
         m[i, : i + 1] = -1.0 / (i + 1)
         m[i, i + 1] = 1.0
         m[i, :] *= np.sqrt((i + 1) / (i + 2))
-    return m / np.linalg.norm(m, axis=1, keepdims=True)
+    normalized: np.ndarray = m / np.linalg.norm(m, axis=1, keepdims=True)
+    return normalized
 
 
 @register(
