@@ -35,6 +35,7 @@ dev = [
   "hypothesis",
   "ruff",
   "mypy",
+  "pandas-stubs",
   "pre-commit",
   "nbclient",
 ]
@@ -51,7 +52,11 @@ extend-exclude = ["ARCHITECTURE.md"]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
-python_version = "3.11"
+# Higher than requires-python: numpy's bundled stubs use PEP 695 `type`
+# statements that mypy can only parse when targeting 3.12+. Our own code
+# still has to run on 3.11, so it must not rely on syntax mypy would only
+# accept because of this setting.
+python_version = "3.13"
 mypy_path = "src"
 plugins = ["pydantic.mypy"]
 strict = true

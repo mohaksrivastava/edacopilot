@@ -17,8 +17,11 @@ from edacore.contracts import (
     CheckStatus,
     ColumnProfile,
     DatasetProfile,
+    DuplicateReport,
     Eligibility,
+    LeakageFlag,
     SemanticType,
+    StructureReport,
     TestResult,
     TransformRecord,
 )
@@ -139,6 +142,38 @@ def test_transform_record_round_trip() -> None:
         warnings=["2 values capped at the 99th percentile"],
     )
     _round_trip(record)
+
+
+def test_duplicate_report_round_trip() -> None:
+    report = DuplicateReport(
+        n_exact=3,
+        exact_duplicate_indices=[4, 5, 9],
+        key_columns=["customer_id"],
+        n_key_duplicates=2,
+        key_duplicate_indices=[4, 5],
+    )
+    _round_trip(report)
+
+
+def test_structure_report_round_trip() -> None:
+    report = StructureReport(
+        structure="panel",
+        time_index="date",
+        entity_id="customer_id",
+        confidence=0.8,
+        reasons=["'customer_id' repeats across multiple 'date' values -> panel"],
+    )
+    _round_trip(report)
+
+
+def test_leakage_flag_round_trip() -> None:
+    flag = LeakageFlag(
+        column="outcome_derived",
+        reason="column name contains target name 'outcome'",
+        method="name_match",
+        score=None,
+    )
+    _round_trip(flag)
 
 
 @pytest.mark.parametrize("member", list(SemanticType))

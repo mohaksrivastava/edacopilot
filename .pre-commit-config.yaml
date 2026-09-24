@@ -10,6 +10,6 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
-        additional_dependencies: ["pydantic>=2"]
+        additional_dependencies: ["pydantic>=2", "pandas>=2.2", "pandas-stubs", "numpy"]
         args: [src/]
         pass_filenames: false

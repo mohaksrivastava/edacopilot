@@ -131,3 +131,38 @@ class TransformRecord(BaseModel):
     summary_before: dict[str, Any] = Field(default_factory=dict)
     summary_after: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+
+
+# --- Profiling-stage result types (Section 6.1) -----------------------------
+# Section 5 doesn't spell these out, but Section 6.1 names them as the return
+# types of detect_duplicates, detect_structure, and detect_leakage_candidates,
+# and rule 6 requires rich return objects rather than bare tuples.
+
+
+class DuplicateReport(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    n_exact: int
+    exact_duplicate_indices: list[int] = Field(default_factory=list)
+    key_columns: list[str] | None = None
+    n_key_duplicates: int = 0
+    key_duplicate_indices: list[int] = Field(default_factory=list)
+
+
+class StructureReport(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    structure: Literal["cross_sectional", "time_series", "panel", "repeated_measures", "unknown"]
+    time_index: str | None = None
+    entity_id: str | None = None
+    confidence: float
+    reasons: list[str] = Field(default_factory=list)
+
+
+class LeakageFlag(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    column: str
+    reason: str
+    method: str
+    score: float | None = None

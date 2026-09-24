@@ -6,4 +6,6 @@ the ``edacopilot`` agent layer (ARCHITECTURE.md, Section 3.1).
 
 from __future__ import annotations
 
+from edacore import profiling as profiling
+
 __version__ = "0.1.0"
