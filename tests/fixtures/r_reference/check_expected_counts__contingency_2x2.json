@@ -1,0 +1,1 @@
+{"r_function":"chisq.test(x)$expected","data":"contingency_2x2.csv","expected":[22.5,27.5,22.5,27.5],"min_expected":22.5,"pct_cells_below_5":0}

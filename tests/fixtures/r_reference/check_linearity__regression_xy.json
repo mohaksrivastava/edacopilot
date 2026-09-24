@@ -1,0 +1,1 @@
+{"r_function":"lmtest::harvtest, lmtest::resettest","data":"regression_xy.csv","harvey_collier_statistic":0.6004094129827776,"harvey_collier_p_value":0.5499965331111125,"reset_statistic":0.1518432469020429,"reset_p_value":0.8593829224334346}

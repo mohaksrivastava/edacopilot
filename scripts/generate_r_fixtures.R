@@ -32,9 +32,17 @@ if (length(missing_packages) > 0) {
   )
 }
 
-script_dir <- dirname(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FALSE), value = TRUE)))
-if (length(script_dir) == 0 || script_dir == "") script_dir <- "."
-repo_root <- normalizePath(file.path(script_dir, ".."))
+# Run this from the repo root (e.g. `Rscript scripts/generate_r_fixtures.R`).
+# Deliberately not auto-detecting the script's own location: that requires
+# parsing commandArgs() for "--file=", which is absent (and silently wrong)
+# under `Rscript -e 'source(...)'` or when sourced from an R session.
+repo_root <- getwd()
+if (!dir.exists(file.path(repo_root, "tests")) || !file.exists(file.path(repo_root, "pyproject.toml"))) {
+  stop(
+    "Run this script from the edacopilot repo root (expected ./tests and ",
+    "./pyproject.toml under the current directory: ", repo_root, ")"
+  )
+}
 out_dir <- file.path(repo_root, "tests", "fixtures", "r_reference")
 data_dir <- file.path(out_dir, "data")
 dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
@@ -447,18 +455,28 @@ write_fixture("risk_ratio__contingency_2x2", list(
   estimate = es_rr$Risk_ratio, ci_low = es_rr$CI_low, ci_high = es_rr$CI_high
 ))
 
-es_rd <- effectsize::riskdifference(contingency_2x2)
+# effectsize has no risk-difference function (only riskratio/oddsratio); a
+# difference of proportions with its Wald CI is exactly what
+# stats::prop.test computes for a 2-sample table, so use that instead.
+rd_x <- contingency_2x2[, "event"]
+rd_n <- rowSums(contingency_2x2)
+rd_test <- prop.test(rd_x, rd_n, correct = FALSE)
 write_fixture("risk_difference__contingency_2x2", list(
-  r_function = "effectsize::riskdifference", data = "contingency_2x2.csv",
-  estimate = es_rd$Risk_difference, ci_low = es_rd$CI_low, ci_high = es_rd$CI_high
+  r_function = "stats::prop.test(correct=FALSE)", data = "contingency_2x2.csv",
+  estimate = unname(rd_test$estimate[1] - rd_test$estimate[2]),
+  ci_low = rd_test$conf.int[1], ci_high = rd_test$conf.int[2]
 ))
 
 p1 <- contingency_2x2["exposed", "event"] / sum(contingency_2x2["exposed", ])
 p2 <- contingency_2x2["unexposed", "event"] / sum(contingency_2x2["unexposed", ])
-es_h <- effectsize::cohens_h(p1, p2)
+# cohens_h(x) takes a 2x2 table, not two scalar proportions: it reads
+# p1/p2 as Obs[1,1]/colSum1 and Obs[1,2]/colSum2, so columns must be the
+# two compared groups. Our matrix has groups as rows, so transpose it.
+es_h <- effectsize::cohens_h(t(contingency_2x2))
 write_fixture("cohens_h__contingency_2x2", list(
-  r_function = "effectsize::cohens_h", data = "contingency_2x2.csv",
-  p1 = unname(p1), p2 = unname(p2), estimate = es_h$Cohens_h
+  r_function = "effectsize::cohens_h(t(x))", data = "contingency_2x2.csv",
+  p1 = unname(p1), p2 = unname(p2), estimate = es_h$Cohens_h,
+  ci_low = es_h$CI_low, ci_high = es_h$CI_high
 ))
 
 chi_3x3 <- chisq.test(contingency_3x3)

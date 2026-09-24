@@ -1,0 +1,1 @@
+{"r_function":"effectsize::rank_epsilon_squared","data":"three_groups.csv","kruskal_statistic":10.218412698412692,"kruskal_p_value":0.006040875367114187,"estimate":0.1148136258248617,"ci_low":0.04675686612341672,"ci_high":1}

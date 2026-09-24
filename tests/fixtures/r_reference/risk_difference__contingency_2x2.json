@@ -1,0 +1,1 @@
+{"r_function":"stats::prop.test(correct=FALSE)","data":"contingency_2x2.csv","estimate":0.3,"ci_low":0.1140614903086316,"ci_high":0.4859385096913684}

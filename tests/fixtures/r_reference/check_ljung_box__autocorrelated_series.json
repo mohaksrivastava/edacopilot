@@ -1,0 +1,1 @@
+{"r_function":"stats::Box.test(type=\"Ljung-Box\")","data":"autocorrelated_series.csv","lag":10,"statistic":111.13758335034325,"df":10,"p_value":0}

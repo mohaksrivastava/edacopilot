@@ -1,0 +1,1 @@
+{"r_function":"effectsize::cohens_d(paired=TRUE)","data":"paired_before_after.csv","estimate":0.7771017155041573,"ci_low":0.3937431148621274,"ci_high":1.151667561605239}

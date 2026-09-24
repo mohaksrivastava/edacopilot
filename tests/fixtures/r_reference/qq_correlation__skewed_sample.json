@@ -1,0 +1,1 @@
+{"r_function":"cor(sort(x), qnorm(ppoints(length(x))))","data":"skewed_sample.csv","r":0.9369004759788652}

@@ -1,0 +1,1 @@
+{"r_function":"effectsize::cramers_v(adjust=TRUE)","data":"contingency_3x3.csv","estimate":0.2891244816249128,"ci_low":0.1352824820551808,"ci_high":1}

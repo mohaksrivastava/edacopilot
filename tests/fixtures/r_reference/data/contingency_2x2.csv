@@ -1,0 +1,5 @@
+"exposure","outcome","Freq"
+"exposed","event",30
+"unexposed","event",15
+"exposed","no_event",20
+"unexposed","no_event",35
