@@ -1,0 +1,1 @@
+{"r_function":"stats::chisq.test","data":"category_counts.csv","expected_probs":[0.2,0.3,0.3,0.2],"statistic":2.333333333333333,"df":3,"p_value":0.5061652190939089}

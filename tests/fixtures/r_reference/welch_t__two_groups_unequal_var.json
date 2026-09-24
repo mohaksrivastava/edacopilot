@@ -1,0 +1,1 @@
+{"r_function":"stats::t.test(var.equal=FALSE)","data":"two_groups_unequal_var.csv","statistic":-0.340910603157639,"df":42.883520988227296,"p_value":0.7348355197727878,"estimate_diff":-1.739805851728349,"ci_low":-12.032617155885946,"ci_high":8.553005452429248}

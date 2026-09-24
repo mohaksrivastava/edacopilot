@@ -638,7 +638,7 @@ write_fixture("chi2_goodness_of_fit__category_counts", list(
 
 ## Two independent groups ---------------------------------------------------
 
-st_eq <- t.test(value ~ group, data = two_groups_equal_var, var.equal = TRUE)
+st_eq <- t.test(value ~ group, data = group_equal_var, var.equal = TRUE)
 write_fixture("student_t__two_groups_equal_var", list(
   r_function = "stats::t.test(var.equal=TRUE)", data = "two_groups_equal_var.csv",
   statistic = unname(st_eq$statistic), df = unname(st_eq$parameter), p_value = st_eq$p.value,
@@ -646,7 +646,7 @@ write_fixture("student_t__two_groups_equal_var", list(
   ci_low = st_eq$conf.int[1], ci_high = st_eq$conf.int[2]
 ))
 
-wt_uneq <- t.test(value ~ group, data = two_groups_unequal_var, var.equal = FALSE)
+wt_uneq <- t.test(value ~ group, data = group_unequal_var, var.equal = FALSE)
 write_fixture("welch_t__two_groups_unequal_var", list(
   r_function = "stats::t.test(var.equal=FALSE)", data = "two_groups_unequal_var.csv",
   statistic = unname(wt_uneq$statistic), df = unname(wt_uneq$parameter), p_value = wt_uneq$p.value,
@@ -654,7 +654,7 @@ write_fixture("welch_t__two_groups_unequal_var", list(
   ci_low = wt_uneq$conf.int[1], ci_high = wt_uneq$conf.int[2]
 ))
 
-yuen_result <- WRS2::yuen(value ~ group, data = two_groups_unequal_var, tr = 0.2)
+yuen_result <- WRS2::yuen(value ~ group, data = group_unequal_var, tr = 0.2)
 write_fixture("yuen_trimmed_t__two_groups_unequal_var", list(
   r_function = "WRS2::yuen(tr=0.2)", data = "two_groups_unequal_var.csv",
   statistic = unname(yuen_result$test), df = unname(yuen_result$df),
@@ -662,13 +662,13 @@ write_fixture("yuen_trimmed_t__two_groups_unequal_var", list(
   ci_low = yuen_result$conf.int[1], ci_high = yuen_result$conf.int[2]
 ))
 
-mw <- wilcox.test(value ~ group, data = two_groups_equal_var, conf.int = TRUE)
+mw <- wilcox.test(value ~ group, data = group_equal_var, conf.int = TRUE)
 write_fixture("mann_whitney__two_groups_equal_var", list(
   r_function = "stats::wilcox.test", data = "two_groups_equal_var.csv",
   statistic = unname(mw$statistic), p_value = mw$p.value
 ))
 
-bm <- brunnermunzel::brunnermunzel.test(value ~ group, data = two_groups_equal_var)
+bm <- brunnermunzel::brunnermunzel.test(value ~ group, data = group_equal_var)
 write_fixture("brunner_munzel__two_groups_equal_var", list(
   r_function = "brunnermunzel::brunnermunzel.test", data = "two_groups_equal_var.csv",
   statistic = unname(bm$statistic), df = unname(bm$parameter), p_value = bm$p.value,
@@ -676,8 +676,8 @@ write_fixture("brunner_munzel__two_groups_equal_var", list(
 ))
 
 ks2 <- suppressWarnings(ks.test(
-  two_groups_equal_var$value[two_groups_equal_var$group == "A"],
-  two_groups_equal_var$value[two_groups_equal_var$group == "B"]
+  group_equal_var$value[group_equal_var$group == "A"],
+  group_equal_var$value[group_equal_var$group == "B"]
 ))
 write_fixture("ks_two_sample__two_groups_equal_var", list(
   r_function = "stats::ks.test", data = "two_groups_equal_var.csv",

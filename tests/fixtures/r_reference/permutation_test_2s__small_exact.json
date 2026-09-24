@@ -1,0 +1,1 @@
+{"r_function":"manual exact enumeration via combn (no package: C(12,6)=924 assignments)","data":"permutation_two_sample_small.csv","observed_diff":-2.721666666666668,"p_value":0.1601731601731602,"n_permutations":924}

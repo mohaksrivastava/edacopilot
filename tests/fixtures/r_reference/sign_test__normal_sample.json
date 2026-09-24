@@ -1,0 +1,1 @@
+{"r_function":"stats::binom.test on sign(x - mu0)","data":"normal_sample.csv","mu0":48,"n_positive":34,"n_nonzero":60,"statistic":34,"p_value":0.3662940067032922,"estimate":0.5666666666666667}

@@ -11,5 +11,6 @@ from edacore import effect_sizes as effect_sizes
 from edacore import multiplicity as multiplicity
 from edacore import power as power
 from edacore import profiling as profiling
+from edacore import stattests as stattests
 
 __version__ = "0.1.0"

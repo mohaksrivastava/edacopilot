@@ -1353,6 +1353,68 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
 
+### 2026-09-24 — M3 part 1 (tag `m3.1`)
+Section 6.7's one-sample, two-independent-group, and two-paired-group
+hypothesis tests: `one_sample_t`, `wilcoxon_one_sample`, `sign_test`,
+`binomial_test`, `chi2_goodness_of_fit`, `bootstrap_one_sample`,
+`student_t`, `welch_t`, `yuen_trimmed_t`, `mann_whitney`, `brunner_munzel`,
+`permutation_test_2s`, `bootstrap_diff`, `ks_two_sample`, `paired_t`,
+`wilcoxon_signed_rank`, `sign_test_paired`, `permutation_test_paired`.
+
+- `generate_r_fixtures.R` had a real bug blocking every two-sample/paired
+  fixture: the M3 section referenced R objects `two_groups_equal_var` /
+  `two_groups_unequal_var` (the *CSV filenames*), but those data frames
+  were actually assigned to `group_equal_var` / `group_unequal_var`
+  earlier in the script. Fixed all six call sites; reran end-to-end;
+  diffed every pre-existing fixture byte-for-byte against a backup taken
+  before the rerun — nothing from M2/M2.1/M2.2 changed, only the 16 new
+  M3 fixtures and the two new small-n permutation datasets were added.
+- Permutation tests (`permutation_test_2s`, `permutation_test_paired`) use
+  exact full enumeration (`scipy.stats.permutation_test(...,
+  n_resamples=np.inf)`) when the number of distinct arrangements is
+  ≤100,000, Monte Carlo above that; the mode used is reported in
+  `TestResult.warnings`. Exact mode verified against R's own
+  full-enumeration fixtures (`combn`/`expand.grid`, no package) and,
+  independently, against a hand-rolled `itertools` enumeration.
+- **Four real R/Python default discrepancies found and resolved per the
+  maintainer's explicit choice** (not silently patched):
+  - *Wilcoxon statistic* (`wilcoxon_one_sample`, `wilcoxon_signed_rank`):
+    scipy's `wilcoxon()` always reports `min(W+, W-)`; R's `wilcox.test()`
+    always reports `V = W+` (sum of positive-difference ranks). Chose to
+    match R's `V` convention.
+  - *Wilcoxon/Mann-Whitney p-value method selection*: scipy's `'auto'`
+    mode and R's default exact/asymptotic threshold (and R's default
+    continuity correction) disagree for some n, giving different
+    p-values for identical data. Chose to replicate R's threshold rule
+    (exact when n<50 and no ties, else continuity-corrected normal
+    approximation) rather than keep scipy's own `'auto'` choice — now
+    bit-matches R on every fixture.
+  - *`yuen_trimmed_t` statistic sign*: read `WRS2::yuen`'s source
+    directly (`print(WRS2::yuen)`) — it hard-codes
+    `test <- abs(dif/sqrt(q1+q2))`, an unsigned statistic. Chose to keep
+    a signed statistic (consistent with `estimate`'s sign and with how
+    `student_t`/`welch_t`/`paired_t` report signed statistics elsewhere
+    in this module); magnitude matches R exactly, sign is the documented,
+    intentional difference. Also added the CI `yuen_trimmed_t` was
+    missing entirely (R's `WRS2::yuen` hard-codes a 95% CI regardless of
+    any `alpha`/`ci` argument passed; this implementation takes a `ci`
+    parameter properly).
+  - `brunner_munzel` was also missing `TestResult.df` (scipy's result
+    object doesn't expose it) and had a wrong, invented formula for its
+    `estimate`. Fixed by replicating scipy's own internal Satterthwaite-df
+    formula (read from `scipy/stats/_stats_py.py`) and correcting the
+    relative-effect formula to `(mean rank of y - mean rank of x)/N +
+    0.5`; both now match the R fixture.
+- One real bug found and fixed while writing tests (not a discrepancy —
+  self-inconsistent within Python alone): `one_sample_t`'s CI was on the
+  wrong scale. scipy's `ttest_1samp(x, mu0).confidence_interval()` is the
+  CI for the raw sample mean (independent of `mu0`), but `estimate` was
+  `mean - mu0`. Fixed by shifting the CI bounds by `-mu0` so both are on
+  the same scale as `estimate`.
+- `kendalls_w` now adds a runtime warning to `TestResult.warnings` (not
+  just the docstring) when its CI is computed from fewer than 50 subjects,
+  carrying the same coverage figures as the M2.2 docstring note.
+
 ### 2026-09-24 — M2.2 (tag `m2.2`)
 Resolves the one open item M2.1 left: `kendalls_w`'s BCa coverage came in
 at 91.4% against a [93%, 97%] target. Diagnosed rather than assumed either

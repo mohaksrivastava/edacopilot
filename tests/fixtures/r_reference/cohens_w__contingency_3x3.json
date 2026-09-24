@@ -1,1 +1,1 @@
-{"r_function":"effectsize::cohens_w","data":"contingency_3x3.csv","chisq_statistic":24.593431122448983,"estimate":0.4435622267276508}
+{"r_function":"effectsize::cohens_w","data":"contingency_3x3.csv","chisq_statistic":24.593431122448983,"estimate":0.4435622267276508,"ci_low":0.2612860468733409,"ci_high":1.414213562373095}

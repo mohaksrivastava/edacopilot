@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -223,6 +224,30 @@ def test_kendalls_w_matches_r_point_estimate() -> None:
         df,
         namespace=_NAMESPACE,
     )
+
+
+def test_kendalls_w_warns_below_50_subjects() -> None:
+    # repeated_measures_long.csv has 25 subjects.
+    df = _data("repeated_measures_long")
+    result = edacore.effect_sizes.kendalls_w(df, "value", "condition", "subject")
+    assert result["warnings"]
+    assert "25 subjects" in result["warnings"][0]
+
+
+def test_kendalls_w_no_warning_at_50_or_more_subjects() -> None:
+    rng = np.random.default_rng(0)
+    n_subj, k = 50, 4
+    subject_fx = rng.normal(0, 8, (n_subj, 1))
+    values = subject_fx + np.array([0.0, 2.0, 5.0, 4.0]) + rng.normal(0, 3, (n_subj, k))
+    df = pd.DataFrame(
+        {
+            "subject": np.repeat(np.arange(n_subj), k),
+            "condition": np.tile(np.arange(k), n_subj),
+            "value": values.ravel(),
+        }
+    )
+    result = edacore.effect_sizes.kendalls_w(df, "value", "condition", "subject")
+    assert result["warnings"] == []
 
 
 # --------------------------------------------------------------------------

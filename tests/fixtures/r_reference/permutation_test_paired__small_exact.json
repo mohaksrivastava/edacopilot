@@ -1,0 +1,1 @@
+{"r_function":"manual exact enumeration via expand.grid sign flips (no package: 2^6=64 patterns)","data":"permutation_paired_small.csv","observed_diff":5.678333333333332,"p_value":0.03125,"n_permutations":64}

@@ -1,0 +1,1 @@
+{"r_function":"stats::binom.test on sign(after - before)","data":"paired_before_after.csv","n_positive":28,"n_nonzero":35,"statistic":28,"p_value":0.0005082604475319392,"estimate":0.8}

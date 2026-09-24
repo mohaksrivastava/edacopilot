@@ -1,0 +1,1 @@
+{"r_function":"stats::t.test(paired=TRUE)","data":"paired_before_after.csv","statistic":4.597395748506174,"df":34,"p_value":5.67881709076096e-05,"estimate":4.267225736723816,"ci_low":2.380930419142329,"ci_high":6.153521054305303}

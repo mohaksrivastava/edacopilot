@@ -1,0 +1,1 @@
+{"r_function":"stats::t.test","data":"normal_sample.csv","mu0":48,"statistic":1.365550449467103,"df":59,"p_value":0.1772638494097121,"estimate":49.552143463694811,"ci_low":47.277725921526915,"ci_high":51.826561005862708}
