@@ -1353,6 +1353,40 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
 
+### 2026-09-24 — M2.2 (tag `m2.2`)
+Resolves the one open item M2.1 left: `kendalls_w`'s BCa coverage came in
+at 91.4% against a [93%, 97%] target. Diagnosed rather than assumed either
+"bug" or "fine":
+
+- True W used in the coverage simulation is 0.31-0.33 throughout (a
+  200x-oversized Monte Carlo sample of the same data-generating process) —
+  not near 0 or 1, so the simulation's design wasn't the problem.
+- Ran 2000 trials at n=25/50/100 subjects (same DGP, true W stable): 91.1%
+  / 93.3% / 94.5%. Coverage climbs monotonically toward nominal as n
+  grows and is already inside the target band at n=100 — the signature of
+  a finite-sample BCa property, not a bug (a bug would typically produce
+  a constant bias or non-monotonic behavior regardless of n, not a clean
+  convergence curve).
+- Per the maintainer's own decision rule for this outcome: moved the
+  committed coverage test to n=100 (still passes: epsilon_squared and
+  kendalls_w both green in the same run) and added a small-n validity
+  note to `kendalls_w`'s docstring — its CI is narrower than its stated
+  confidence level for repeated-measures studies with well under 100
+  subjects; the point estimate itself isn't affected.
+- CI: coverage-simulation tests are marked `slow` and now run on exactly
+  one leg (`ubuntu-latest` / Python 3.12), excluded from every other
+  matrix leg and from `test-min-versions` — they're deterministic
+  (fixed seeds), so running them on every OS/Python combination bought
+  nothing but wall-clock time. New per-leg CI times below M2.1's, once
+  this run's numbers are in.
+- `generate_r_fixtures.R`: replaced the two permutation-test fixtures'
+  Monte Carlo shuffle (10000 random draws, no exact match possible against
+  Python's own RNG) with **exact, full-enumeration** permutation tests on
+  small dedicated datasets — 6 vs 6 (all C(12,6)=924 group-assignments) for
+  the two-sample case, 6 pairs (all 2^6=64 sign-flip patterns) for the
+  paired case. Both use only base R (`combn`, `expand.grid`) — no new
+  package, and no more RNG-mismatch caveat needed for these two fixtures.
+
 ### 2026-09-24 — M2.1 (tag `m2.1`)
 Closes out M2's three real discrepancies and one solver-tolerance gap by
 reading `effectsize`'s actual R source rather than guessing at its methods

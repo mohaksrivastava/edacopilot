@@ -40,7 +40,15 @@ jobs:
         run: mypy src/
 
       - name: pytest
-        run: pytest -m "not llm"
+        run: pytest -m "not llm and not slow"
+
+      # Coverage-simulation tests (hundreds of bootstrap trials) run on one
+      # leg only -- they're deterministic (fixed seeds), so running them on
+      # every OS/Python combination would just multiply wall-clock time
+      # without checking anything new.
+      - name: pytest (slow)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: pytest -m "slow"
 
       # Exercises notebook export (Section 14, milestone M14): every accepted
       # step must round-trip through nbclient and reproduce its numbers. This
@@ -69,4 +77,4 @@ jobs:
           python -m pip install "numpy==1.26.0" "pandas==2.2.0" "scipy==1.13.0" "statsmodels==0.14.0"
 
       - name: pytest
-        run: pytest -m "not llm"
+        run: pytest -m "not llm and not slow"

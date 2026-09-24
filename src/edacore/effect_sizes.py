@@ -613,6 +613,15 @@ def kendalls_w(
     plain percentile for a tighter interval; see
     test_effect_size_ci_coverage.py for the simulation-based validation
     that warrants in place of exact fixture matching.
+
+    Small-n caveat: measured CI coverage for this BCa interval is below
+    the nominal level for repeated-measures designs with few subjects,
+    improving as the number of subjects grows (91.1% actual coverage of a
+    95% CI at 25 subjects, 93.3% at 50, 94.5% at 100 — measured directly
+    at 2000 simulated datasets per point, same data-generating process
+    throughout). Treat a `kendalls_w` CI from a study with well under 100
+    subjects as narrower than its stated confidence level; the point
+    estimate itself has no such bias.
     """
 
     def _w(mat: np.ndarray) -> float:

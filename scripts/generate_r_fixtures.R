@@ -684,26 +684,37 @@ write_fixture("ks_two_sample__two_groups_equal_var", list(
   statistic = unname(ks2$statistic), p_value = ks2$p.value
 ))
 
-# Permutation test: the observed statistic is deterministic and IS
-# compared exactly; the p-value is RNG-dependent (R and Python permute
-# differently even from the same conceptual algorithm) so Python's tests
-# compare it with a loose tolerance instead of exact equality.
-perm_a <- two_groups_equal_var$value[two_groups_equal_var$group == "A"]
-perm_b <- two_groups_equal_var$value[two_groups_equal_var$group == "B"]
-observed_diff <- mean(perm_a) - mean(perm_b)
-set.seed(20260101)
-n_perm <- 10000
-combined <- c(perm_a, perm_b)
-n_a <- length(perm_a)
-perm_diffs <- replicate(n_perm, {
-  shuffled <- sample(combined)
-  mean(shuffled[1:n_a]) - mean(shuffled[(n_a + 1):length(combined)])
+# Permutation test: exact (full enumeration), not Monte Carlo. A
+# permutation p-value is exact by construction once every distinct
+# assignment is enumerated -- no package needed, no R/Python RNG mismatch
+# to work around, and no "loose tolerance" comparison required. Full
+# enumeration is only tractable for small n, hence a dedicated small
+# dataset here rather than reusing two_groups_equal_var (n=40 per group
+# would mean C(80,40) ~ 10^23 assignments).
+n_perm_small <- 6
+perm_small_a <- round(rnorm(n_perm_small, mean = 20, sd = 5), 2)
+perm_small_b <- round(rnorm(n_perm_small, mean = 25, sd = 5), 2)
+write_data(
+  "permutation_two_sample_small",
+  data.frame(value = c(perm_small_a, perm_small_b), group = rep(c("A", "B"), each = n_perm_small))
+)
+
+combined_small <- c(perm_small_a, perm_small_b)
+n_total_small <- length(combined_small)
+observed_diff <- mean(perm_small_a) - mean(perm_small_b)
+
+# All C(12, 6) = 924 ways to choose which 6 of the 12 values form group A;
+# the complement is group B. Each combination is one point in the exact
+# permutation distribution of the mean-difference statistic.
+all_combos <- combn(n_total_small, n_perm_small)
+perm_diffs <- apply(all_combos, 2, function(idx) {
+  mean(combined_small[idx]) - mean(combined_small[-idx])
 })
-perm_p <- mean(abs(perm_diffs) >= abs(observed_diff))
-write_fixture("permutation_test_2s__two_groups_equal_var", list(
-  r_function = "manual permutation (n_perm=10000, seed=20260101)",
-  data = "two_groups_equal_var.csv",
-  observed_diff = observed_diff, p_value = perm_p, n_perm = n_perm
+perm_p <- mean(abs(perm_diffs) >= abs(observed_diff) - 1e-10)
+write_fixture("permutation_test_2s__small_exact", list(
+  r_function = "manual exact enumeration via combn (no package: C(12,6)=924 assignments)",
+  data = "permutation_two_sample_small.csv",
+  observed_diff = observed_diff, p_value = perm_p, n_permutations = ncol(all_combos)
 ))
 
 ## Two paired groups ---------------------------------------------------------
@@ -732,18 +743,30 @@ write_fixture("sign_test_paired__paired_before_after", list(
   estimate = unname(sign_paired$estimate)
 ))
 
-observed_diff_paired <- mean(diffs)
-set.seed(20260102)
-n_perm_paired <- 10000
-perm_diffs_paired <- replicate(n_perm_paired, {
-  signs_rand <- sample(c(-1, 1), length(diffs), replace = TRUE)
-  mean(diffs * signs_rand)
-})
-perm_p_paired <- mean(abs(perm_diffs_paired) >= abs(observed_diff_paired))
-write_fixture("permutation_test_paired__paired_before_after", list(
-  r_function = "manual sign-flip permutation (n_perm=10000, seed=20260102)",
-  data = "paired_before_after.csv",
-  observed_diff = observed_diff_paired, p_value = perm_p_paired, n_perm = n_perm_paired
+# Paired permutation test: exact (full enumeration) sign-flips, not Monte
+# Carlo. 2^6 = 64 sign patterns is small enough to enumerate completely;
+# again a small dedicated dataset (2^35 patterns for the full 35-pair
+# paired_before_after would not be tractable to enumerate).
+n_pair_small <- 6
+perm_small_before <- round(rnorm(n_pair_small, mean = 70, sd = 10), 2)
+perm_small_after <- perm_small_before + round(rnorm(n_pair_small, mean = 4, sd = 5), 2)
+write_data(
+  "permutation_paired_small",
+  data.frame(before = perm_small_before, after = perm_small_after)
+)
+
+diffs_small <- perm_small_after - perm_small_before
+observed_diff_paired <- mean(diffs_small)
+
+# All 2^6 = 64 ways to flip the sign of each paired difference.
+sign_patterns <- as.matrix(expand.grid(rep(list(c(-1, 1)), n_pair_small)))
+perm_diffs_paired <- apply(sign_patterns, 1, function(signs) mean(diffs_small * signs))
+perm_p_paired <- mean(abs(perm_diffs_paired) >= abs(observed_diff_paired) - 1e-10)
+write_fixture("permutation_test_paired__small_exact", list(
+  r_function = "manual exact enumeration via expand.grid sign flips (no package: 2^6=64 patterns)",
+  data = "permutation_paired_small.csv",
+  observed_diff = observed_diff_paired, p_value = perm_p_paired,
+  n_permutations = nrow(sign_patterns)
 ))
 
 cat("Wrote fixtures to", out_dir, "\n")

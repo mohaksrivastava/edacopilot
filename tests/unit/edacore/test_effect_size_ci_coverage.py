@@ -76,7 +76,14 @@ def test_epsilon_squared_ci_coverage() -> None:
 
 
 def test_kendalls_w_ci_coverage() -> None:
-    n_subj, k = 25, 4
+    """n_subj=100, not 25: BCa's coverage for kendalls_w is n-dependent and
+    converges to nominal from below (measured directly at 2000 trials/n,
+    true W=0.31-0.33 throughout, so this isn't a degenerate-design
+    artifact): 91.1% at n=25, 93.3% at n=50, 94.5% at n=100. That's a
+    finite-sample property of BCa at this sample size, not a bug -- see
+    kendalls_w's docstring for the small-n caveat this motivated. Testing
+    at n=25 would fail this assertion on a correct implementation."""
+    n_subj, k = 100, 4
     condition_effects = np.array([0.0, 2.0, 5.0, 4.0])
     sd_subject, sd_noise = 8.0, 3.0
     true_value = _true_kendalls_w(n_subj, condition_effects, sd_subject, sd_noise)
