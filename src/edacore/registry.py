@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Collection, Iterable
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from edacore.codegen import render_call
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 FunctionKind = Literal[
     "profile", "check", "test", "effect", "transform", "impute", "detect", "viz", "export"
@@ -44,6 +46,7 @@ class FunctionSpec(BaseModel):
     estimand: str | None = None
     code_template: str
     read_only: bool = True
+    takes_df: bool = True
     func: Callable[..., Any] = Field(exclude=True)
 
 
@@ -64,10 +67,24 @@ class Registry:
         assumptions: dict[str, list[str]] | None = None,
         estimand: str | None = None,
         read_only: bool = True,
-    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Decorator that registers a function and returns it unchanged."""
+        takes_df: bool = True,
+    ) -> Callable[[F], F]:
+        """Decorator that registers a function and returns it unchanged.
 
-        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        Typed as `F -> F` (not the erased `Callable[..., Any]`) so a
+        decorated function keeps its real signature for mypy — otherwise
+        any other edacore function calling it (e.g. cliffs_delta forwarding
+        to rank_biserial) would see its return type as `Any`.
+
+        ``takes_df=False`` is for the rare function that doesn't operate on
+        a dataset at all (Section 6.8's ``adjust_pvalues``, which takes a
+        list of p-values from the test ledger, and the power-analysis
+        functions, which take only effect/alpha/power/n). Its first
+        parameter is then a normal, schema-visible parameter rather than the
+        implicit ``df``, and its code_template has no ``{df}`` placeholder.
+        """
+
+        def decorator(func: F) -> F:
             if name in self._functions:
                 raise ValueError(f"function '{name}' is already registered")
             spec = FunctionSpec(
@@ -79,6 +96,7 @@ class Registry:
                 estimand=estimand,
                 code_template=code_template,
                 read_only=read_only,
+                takes_df=takes_df,
                 func=func,
             )
             self._functions[name] = spec
@@ -111,22 +129,24 @@ class Registry:
 
     def json_schema(self, name: str) -> dict[str, Any]:
         """JSON schema of a function's params, excluding ``df`` (Section 3.4)."""
-        return _params_json_schema(self.get(name).func)
+        spec = self.get(name)
+        return _params_json_schema(spec.func, skip_first=spec.takes_df)
 
     def to_code(self, name: str, params: dict[str, Any], df_var: str = "df") -> str:
         """Render a function call as runnable Python source (Section 5.4)."""
-        return render_call(self.get(name).code_template, params, df_var=df_var)
+        spec = self.get(name)
+        return render_call(spec.code_template, params, df_var=df_var if spec.takes_df else None)
 
     def clear(self) -> None:
         self._functions.clear()
 
 
-def _params_json_schema(func: Callable[..., Any]) -> dict[str, Any]:
+def _params_json_schema(func: Callable[..., Any], *, skip_first: bool = True) -> dict[str, Any]:
     sig = inspect.signature(func, eval_str=True)
     fields: dict[str, Any] = {}
     for position, (param_name, param) in enumerate(sig.parameters.items()):
-        if position == 0:
-            continue  # the first argument is always `df`
+        if position == 0 and skip_first:
+            continue  # the first argument is `df`, unless takes_df=False
         annotation = param.annotation if param.annotation is not inspect.Parameter.empty else Any
         default = param.default if param.default is not inspect.Parameter.empty else ...
         fields[param_name] = (annotation, default)

@@ -386,10 +386,13 @@ write_fixture("rank_biserial__two_groups_equal_var", list(
   estimate = es_rb$r_rank_biserial, ci_low = es_rb$CI_low, ci_high = es_rb$CI_high
 ))
 
+# For two independent samples, Cliff's delta and the rank-biserial
+# correlation are the same quantity; effectsize labels the column
+# "r_rank_biserial" here too rather than "Cliffs_delta".
 es_cliffs <- effectsize::cliffs_delta(value ~ group, data = group_equal_var)
 write_fixture("cliffs_delta__two_groups_equal_var", list(
   r_function = "effectsize::cliffs_delta", data = "two_groups_equal_var.csv",
-  estimate = es_cliffs$Cliffs_delta, ci_low = es_cliffs$CI_low, ci_high = es_cliffs$CI_high
+  estimate = es_cliffs$r_rank_biserial, ci_low = es_cliffs$CI_low, ci_high = es_cliffs$CI_high
 ))
 
 aov_fit <- aov(value ~ group, data = k_group_df)
@@ -399,10 +402,12 @@ write_fixture("eta_squared__three_groups", list(
   estimate = es_eta2$Eta2, ci_low = es_eta2$CI_low, ci_high = es_eta2$CI_high
 ))
 
+# For one-way designs, partial eta^2 == eta^2 (effectsize warns and returns
+# eta^2 under the same "Eta2" column, not a separate "Eta2_partial").
 es_peta2 <- effectsize::eta_squared(aov_fit, partial = TRUE)
 write_fixture("partial_eta_squared__three_groups", list(
   r_function = "effectsize::eta_squared(partial=TRUE)", data = "three_groups.csv",
-  estimate = es_peta2$Eta2_partial, ci_low = es_peta2$CI_low, ci_high = es_peta2$CI_high
+  estimate = es_peta2$Eta2, ci_low = es_peta2$CI_low, ci_high = es_peta2$CI_high
 ))
 
 es_omega2 <- effectsize::omega_squared(aov_fit)
@@ -443,15 +448,21 @@ write_fixture("phi__contingency_2x2", list(
   estimate = es_phi$phi, ci_low = es_phi$CI_low, ci_high = es_phi$CI_high
 ))
 
-es_or <- effectsize::oddsratio(contingency_2x2)
+# oddsratio()/riskratio() (like cohens_h above) read the table as
+# columns = compared groups, row 1 = "success"; our matrix has groups as
+# rows, so transpose. (Odds ratio happens to be transpose-invariant --
+# ad/bc is the same either way -- but risk ratio is NOT: leaving it
+# untransposed silently computed P(exposed|event)/P(exposed|no_event)
+# instead of the intended P(event|exposed)/P(event|unexposed).)
+es_or <- effectsize::oddsratio(t(contingency_2x2))
 write_fixture("odds_ratio__contingency_2x2", list(
-  r_function = "effectsize::oddsratio", data = "contingency_2x2.csv",
+  r_function = "effectsize::oddsratio(t(x))", data = "contingency_2x2.csv",
   estimate = es_or$Odds_ratio, ci_low = es_or$CI_low, ci_high = es_or$CI_high
 ))
 
-es_rr <- effectsize::riskratio(contingency_2x2)
+es_rr <- effectsize::riskratio(t(contingency_2x2))
 write_fixture("risk_ratio__contingency_2x2", list(
-  r_function = "effectsize::riskratio", data = "contingency_2x2.csv",
+  r_function = "effectsize::riskratio(t(x))", data = "contingency_2x2.csv",
   estimate = es_rr$Risk_ratio, ci_low = es_rr$CI_low, ci_high = es_rr$CI_high
 ))
 

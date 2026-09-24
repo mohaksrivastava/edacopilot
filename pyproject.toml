@@ -69,6 +69,13 @@ strict = true
 module = "tests.*"
 disallow_untyped_defs = false
 
+[[tool.mypy.overrides]]
+# scipy/statsmodels/sklearn ship no py.typed marker / stubs (unlike
+# pandas, covered by pandas-stubs above); every call into them is
+# effectively Any. Scoped to just these, not a blanket ignore.
+module = ["scipy.*", "statsmodels.*", "sklearn.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

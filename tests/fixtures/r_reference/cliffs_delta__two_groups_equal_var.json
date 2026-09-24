@@ -1,1 +1,1 @@
-{"r_function":"effectsize::cliffs_delta","data":"two_groups_equal_var.csv","estimate":{},"ci_low":-0.4416876536934994,"ci_high":0.03487387134996669}
+{"r_function":"effectsize::cliffs_delta","data":"two_groups_equal_var.csv","estimate":-0.2162500000000001,"ci_low":-0.4416876536934994,"ci_high":0.03487387134996669}

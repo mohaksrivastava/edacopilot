@@ -7,6 +7,16 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
+    # NOTE: this is pinned well behind the "mypy" version pyproject.toml's
+    # dev extra actually installs (unpinned, so always latest — what CI and
+    # `mypy src/` run). This older mypy's numpy stub inference is weaker
+    # around array indexing, so this hook can show false positives in
+    # assumptions.py/effect_sizes.py/power.py that `mypy src/` does not.
+    # Tried bumping to v1.19.0 (2026-09-24): a Windows Application Control
+    # policy on this machine blocked that version's compiled DLL from
+    # loading under pre-commit's cache. Reverted rather than chase two
+    # mypy versions' worth of numpy-typing compatibility — `mypy src/` via
+    # CI is authoritative; treat this hook as a local convenience only.
     rev: v1.11.2
     hooks:
       - id: mypy

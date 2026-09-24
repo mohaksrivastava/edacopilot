@@ -1353,6 +1353,63 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
 
+### 2026-09-24 — M2 (tag `m2`)
+- `edacore.assumptions`: all 23 Section 6.6 checks. 19 have a computable
+  statistic and are verified against R fixtures; `check_sample_size`,
+  `check_independence_design`, `check_paired_structure`,
+  `check_measurement_level` are deterministic (no statistic), so have no
+  R fixture and are covered by table-driven tests instead.
+- `edacore.effect_sizes`: all 18 Section 6.8 effect-size functions, plus
+  `magnitude_label` and `bootstrap_effect_ci` (unregistered helpers).
+  `cohens_d`, `hedges_g`, `glass_delta`, `d_z`, `cohens_h`, `odds_ratio`,
+  `risk_ratio`, `risk_difference` match R's point estimate *and* CI
+  exactly (noncentral-t inversion / log-scale Wald / arcsine, whichever
+  `effectsize` uses). The other 10 match R's point estimate but use a
+  percentile bootstrap CI instead of `effectsize`'s noncentral-F /
+  specialized asymptotic CIs — see "Known discrepancies" below.
+- `edacore.multiplicity.adjust_pvalues`: matches R's `p.adjust` to float
+  precision for holm/bonferroni/fdr_bh/fdr_by.
+- `edacore.power`: `required_sample_size`, `minimum_detectable_effect`,
+  ported directly from `pwr` package's R source (not statsmodels' `power`
+  classes, which parameterize ANOVA differently and don't cover
+  `pwr.r.test`'s bias-corrected correlation formula at all).
+- Registry: added `takes_df=False` for functions that don't operate on a
+  dataset (`adjust_pvalues`, the two power functions) — Section 6.8 is the
+  first place a function's first argument legitimately isn't `df`.
+  `registry.register`'s decorator is now typed `F -> F` (was the erased
+  `Callable[..., Any]`), so a decorated function forwarding its result to
+  another decorated function (e.g. `cliffs_delta` -> `rank_biserial`)
+  keeps its real return type under mypy strict.
+- `codegen.render_call`'s `"df"` key reservation is now conditional on
+  `df_var` actually being injected — a `takes_df=False` function can have
+  a genuine parameter named `df` (power's chi-square degrees of freedom)
+  without colliding with the dataframe-variable convention.
+- R fixtures regenerated after fixing three bugs in
+  `generate_r_fixtures.R` itself: `effectsize::riskdifference()` doesn't
+  exist (switched to `stats::prop.test`); `cohens_h`/`oddsratio`/
+  `riskratio` need the 2x2 table transposed to read "columns = compared
+  groups" (odds ratio is transpose-invariant so this was silently
+  masked there, but risk ratio was computing the wrong quantity);
+  `cliffs_delta`/`partial_eta_squared` were reading nonexistent R column
+  names via silent `NULL` (`$` partial-matching happened to save
+  `Glass_delta` but not these two).
+
+**Known discrepancies (point estimates match; these don't):**
+| Function | What differs | Size |
+|---|---|---|
+| `check_normality_anderson` | p-value: scipy `method="interpolate"` table vs R's `nortest::ad.test` table | ~6e-4 |
+| `check_normality_lilliefors` | p-value: statsmodels' approximation vs R's `nortest::lillie.test` table | ~1.1e-2 |
+| `check_sphericity_mauchly` | p-value: this module's chi-square approximation constant vs R's (W itself matches to 1e-9) | ~1.4% relative |
+| `rank_biserial`, `cliffs_delta`, `eta_squared`, `partial_eta_squared`, `omega_squared`, `epsilon_squared`, `kendalls_w`, `cramers_v`, `phi`, `cohens_w` | CI: percentile bootstrap (2000 resamples) here vs `effectsize`'s noncentral-F / specialized asymptotic CI | CI width/bounds differ; not systematically checked against R |
+| `required_sample_size` (all 4 test families) | n: R's `uniroot` default tolerance (~1.2e-4 relative) is looser than this module's root-finder, so R's own reference n doesn't evaluate to exactly the target power | 1e-6 to 4e-6 |
+
+Open question for the maintainer: for the four p-value/CI discrepancies
+(not the `uniroot`-tolerance one, which is just solver precision), should
+this module keep its current defaults (standard scipy/statsmodels methods,
+clearly documented), or is exact bit-for-bit agreement with R's specific
+table/approximation choice required? The latter means porting R's
+reference tables/constants for each one individually.
+
 ### 2026-09-24 — M1.1 (tag `m1.1`)
 - Reconciled `registry.list(stage="profile")` against Section 6.1: all 17
   functions present, nothing missing.

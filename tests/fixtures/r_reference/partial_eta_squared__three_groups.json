@@ -1,1 +1,1 @@
-{"r_function":"effectsize::eta_squared(partial=TRUE)","data":"three_groups.csv","estimate":{},"ci_low":0.01783405152368027,"ci_high":1}
+{"r_function":"effectsize::eta_squared(partial=TRUE)","data":"three_groups.csv","estimate":0.1061697558373533,"ci_low":0.01783405152368027,"ci_high":1}

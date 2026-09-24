@@ -18,18 +18,25 @@ class CodeRenderError(ValueError):
     """A code template could not be rendered from the given params."""
 
 
-def render_call(code_template: str, params: dict[str, Any], df_var: str = "df") -> str:
+def render_call(code_template: str, params: dict[str, Any], df_var: str | None = "df") -> str:
     """Render ``code_template`` against ``params`` and ``df_var``.
 
+    ``df_var`` is ``None`` for functions that don't operate on a dataset at
+    all (e.g. ``adjust_pvalues``, which takes a list of p-values from the
+    test ledger, or power-analysis functions) — their code_template has no
+    ``{df}`` placeholder and none is injected. A ``"df"`` key in ``params``
+    is then just a normal parameter (e.g. power analysis's degrees-of-
+    freedom argument), not a collision.
+
     Raises:
-        CodeRenderError: if ``params`` contains a ``"df"`` key (reserved for
-            ``df_var``), or if the template references a placeholder that is
-            missing from ``params``.
+        CodeRenderError: if ``df_var`` is given and ``params`` also contains
+            a ``"df"`` key (ambiguous: which one is ``{df}``?), or if the
+            template references a placeholder missing from ``params``.
     """
-    if "df" in params:
+    if df_var is not None and "df" in params:
         raise CodeRenderError("'df' is reserved for df_var and must not appear in params")
 
-    values: dict[str, Any] = {"df": df_var, **params}
+    values: dict[str, Any] = {**params} if df_var is None else {"df": df_var, **params}
     try:
         return code_template.format(**values)
     except KeyError as exc:

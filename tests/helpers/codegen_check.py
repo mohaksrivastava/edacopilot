@@ -10,11 +10,25 @@ this at least once.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pandas as pd
 
 from edacore.registry import Registry
+
+
+def _results_equal(a: Any, b: Any) -> bool:
+    """Like `==`, but NaN == NaN (a NaN CI bound is a legitimate result for
+    a degenerate input, and plain `==` would make it impossible to ever
+    match itself)."""
+    if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+        return True
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_results_equal(a[k], b[k]) for k in a)
+    if isinstance(a, list | tuple) and isinstance(b, list | tuple):
+        return len(a) == len(b) and all(_results_equal(x, y) for x, y in zip(a, b, strict=True))
+    return bool(a == b)
 
 
 def assert_codegen_matches(
@@ -40,7 +54,29 @@ def assert_codegen_matches(
     codegen_result = eval(code, exec_namespace)
     direct_result = spec.func(df, **params)
 
-    assert codegen_result == direct_result, (
+    assert _results_equal(codegen_result, direct_result), (
+        f"registry.to_code({name!r}, {params!r}) rendered {code!r}, which evaluated to "
+        f"{codegen_result!r}, but calling the function directly gave {direct_result!r}"
+    )
+
+
+def assert_codegen_matches_no_df(
+    registry: Registry,
+    name: str,
+    params: dict[str, Any],
+    *,
+    namespace: dict[str, Any] | None = None,
+) -> None:
+    """Like `assert_codegen_matches`, for a `takes_df=False` function that
+    doesn't operate on a dataset at all (e.g. `adjust_pvalues`, the
+    power-analysis functions)."""
+    spec = registry.get(name)
+    code = registry.to_code(name, params)
+
+    codegen_result = eval(code, dict(namespace or {}))
+    direct_result = spec.func(**params)
+
+    assert _results_equal(codegen_result, direct_result), (
         f"registry.to_code({name!r}, {params!r}) rendered {code!r}, which evaluated to "
         f"{codegen_result!r}, but calling the function directly gave {direct_result!r}"
     )

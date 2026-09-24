@@ -6,6 +6,10 @@ the ``edacopilot`` agent layer (ARCHITECTURE.md, Section 3.1).
 
 from __future__ import annotations
 
+from edacore import assumptions as assumptions
+from edacore import effect_sizes as effect_sizes
+from edacore import multiplicity as multiplicity
+from edacore import power as power
 from edacore import profiling as profiling
 
 __version__ = "0.1.0"
