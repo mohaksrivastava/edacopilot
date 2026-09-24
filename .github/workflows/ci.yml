@@ -36,19 +36,8 @@ jobs:
       - name: ruff format --check
         run: ruff format --check .
 
-      - name: mypy
-        run: mypy src/
-
       - name: pytest
         run: pytest -m "not llm and not slow"
-
-      # Coverage-simulation tests (hundreds of bootstrap trials) run on one
-      # leg only -- they're deterministic (fixed seeds), so running them on
-      # every OS/Python combination would just multiply wall-clock time
-      # without checking anything new.
-      - name: pytest (slow)
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        run: pytest -m "slow"
 
       # Exercises notebook export (Section 14, milestone M14): every accepted
       # step must round-trip through nbclient and reproduce its numbers. This
@@ -56,6 +45,29 @@ jobs:
       - name: Export round-trip test
         if: hashFiles('tests/**/test_export*.py') != ''
         run: pytest tests/ -k export
+
+  lint:
+    # mypy's inferred types are sensitive to which numpy version pip
+    # resolves (numpy 2.4.6 vs 2.5.x disagree on a few return-type stubs,
+    # producing false-positive no-any-return errors -- see ARCHITECTURE.md
+    # Section 18's M3 part 1 entry). Running it once, pinned, keeps mypy's
+    # pass/fail deterministic instead of drifting with whatever version
+    # each matrix leg's dependency resolver happens to pick.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install edacopilot (dev + all extras, pinned numpy)
+        run: |
+          python -m pip install -e ".[dev,all]"
+          python -m pip install "numpy==2.5.3"
+
+      - name: mypy
+        run: mypy src/
 
   test-min-versions:
     # Section 4.1's dependency floors (pandas>=2.2, scipy>=1.13,

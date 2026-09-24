@@ -189,6 +189,7 @@ edacopilot/
 ├── LICENSE                      # Apache-2.0
 ├── pyproject.toml               # extras: [timeseries], [text], [plotly], [all], [dev]
 ├── .github/workflows/ci.yml
+├── .github/workflows/nightly.yml
 ├── src/
 │   ├── edacore/                 # deterministic library, NO LLM imports
 │   │   ├── __init__.py
@@ -1281,9 +1282,19 @@ Run manually or nightly, per configured model (including a local Ollama model):
 ### 15.5 Conversation tests
 Golden transcripts in `tests/conversations/` replay a sequence of user actions against a mocked LLM (recorded structured outputs) and assert the cards, steps, versions and exported notebook. Run in CI.
 
-### 15.6 CI (`.github/workflows/ci.yml`)
-- Matrix: Python 3.11, 3.12; Ubuntu + Windows.
-- Steps: `ruff check`, `ruff format --check`, `mypy src/`, `pytest -m "not llm"`, export round-trip test (exported notebook executes and reproduces numbers via `nbclient`).
+### 15.6 CI (`.github/workflows/ci.yml`, `.github/workflows/nightly.yml`)
+- `test` job matrix: Python 3.11, 3.12; Ubuntu + Windows. Steps: `ruff check`,
+  `ruff format --check`, `pytest -m "not llm and not slow"`, export
+  round-trip test (exported notebook executes and reproduces numbers via
+  `nbclient`).
+- `lint` job: `mypy src/`, run once (Ubuntu, Python 3.12, numpy pinned) rather
+  than per matrix leg — mypy's inferred types are sensitive to which numpy
+  version pip resolves, so running it once with a pinned version keeps its
+  pass/fail deterministic instead of drifting per-leg (Section 18, M3 part 1).
+- `test-min-versions` job: Section 4.1's dependency floors pinned exactly.
+- `@pytest.mark.slow` tests (coverage simulations) do **not** run on
+  push/PR CI at all — they run on a nightly schedule (`nightly.yml`,
+  `workflow_dispatch` also available for on-demand runs).
 - LLM evals are **not** in CI (cost, non-determinism).
 
 ---
@@ -1352,6 +1363,23 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-24 — M3.1.1 (tag `m3.1.1`)
+CI restructuring, ahead of M3 part 2a:
+
+- `@pytest.mark.slow` tests (coverage simulations) moved out of push/PR CI
+  entirely, into a new `.github/workflows/nightly.yml` (`cron` daily +
+  `workflow_dispatch` for on-demand runs). Push/PR CI now runs fast tests
+  only on every leg.
+- `mypy src/` moved out of the `test` matrix (5 legs) into its own `lint`
+  job: Ubuntu, Python 3.12, numpy pinned to 2.5.3. This directly addresses
+  the failure mode from M3 part 1's CI-fix round — mypy's inferred types
+  disagreed between numpy 2.4.6 (resolved for the 3.11 legs) and 2.5.x
+  (resolved for 3.12), producing false-positive `no-any-return` errors
+  that had nothing to do with the code changing. Running mypy once, with a
+  pinned numpy, makes its pass/fail deterministic regardless of which
+  numpy version each matrix leg's own dependency resolution happens to
+  pick.
 
 ### 2026-09-24 — M3 part 1 (tag `m3.1`)
 Section 6.7's one-sample, two-independent-group, and two-paired-group
