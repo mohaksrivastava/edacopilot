@@ -5,5 +5,8 @@ registration side-effects.
 
 from __future__ import annotations
 
+from edacore.stattests import k_independent as k_independent
+from edacore.stattests import k_related as k_related
 from edacore.stattests import one_sample as one_sample
+from edacore.stattests import posthoc as posthoc
 from edacore.stattests import two_sample as two_sample

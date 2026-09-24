@@ -1,0 +1,1 @@
+{"r_function":"stats::mcnemar.test(correct=TRUE) pairwise + p.adjust(method='holm')","data":"cochran_q_binary.csv","comparisons":["t1 - t2","t1 - t3","t2 - t3"],"statistic":[2.769230769230769,0.4444444444444444,5.0625],"p_unadj":[0.09609232945567309,0.5049850750938459,0.02444894531008943],"p_adj":[0.1921846589113462,0.5049850750938459,0.07334683593026828]}

@@ -1,0 +1,1 @@
+{"r_function":"stats::oneway.test(var.equal=FALSE)","data":"k_groups_unequal_var.csv","statistic":0.1294001228210832,"df1":2,"df2":21.447877513511344,"p_value":0.8793030752994705,"omega_squared":0}

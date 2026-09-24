@@ -120,6 +120,35 @@ class TestResult(BaseModel):
     validity_notes: list[str] = Field(default_factory=list)
 
 
+class PairwiseComparison(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    group_a: str
+    group_b: str
+    statistic: float | None = None
+    p_value: float
+    p_adjusted: float | None = None
+    estimate: float | None = None
+    ci: tuple[float, float] | None = None
+
+
+class PostHocResult(BaseModel):
+    """A k-group post-hoc procedure's pairwise comparisons (Section 6.7's
+    k-group tables) — not spelled out as a model in Section 5, added here
+    the same way DuplicateReport/StructureReport/LeakageFlag were for M1:
+    a rich return type in place of a bare list of tuples (rule 6)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    fact_id: str
+    function: str
+    method: str
+    p_adjust_method: str | None = None
+    comparisons: list[PairwiseComparison]
+    n: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class TransformRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 

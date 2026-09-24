@@ -384,12 +384,28 @@ class LeakageFlag(BaseModel):
     score: float | None             # e.g. the correlation, when the method produces one
 ```
 
+Section 6.7's k-group post-hoc column (`tukey_hsd`, `games_howell`, `dunn_test`, ...)
+names procedures that each produce *multiple* pairwise comparisons, which
+`TestResult` (one result per call) doesn't fit. Added during M3 part 2a:
+```python
+class PairwiseComparison(BaseModel):
+    group_a: str; group_b: str
+    statistic: float | None; p_value: float; p_adjusted: float | None
+    estimate: float | None; ci: tuple[float, float] | None
+
+class PostHocResult(BaseModel):
+    fact_id: str; function: str; method: str
+    p_adjust_method: str | None
+    comparisons: list[PairwiseComparison]
+    n: dict[str, int]; warnings: list[str]
+```
+
 ### 5.4 Function registry
 Every public `edacore` function is registered:
 ```python
 @register(
     name="welch_t_test",
-    kind="test",                    # profile|check|test|effect|transform|impute|detect|viz|export
+    kind="test",                    # profile|check|test|effect|posthoc|transform|impute|detect|viz|export
     stage="hypothesis",
     tags={"parametric", "two_sample", "independent", "robust_to_unequal_var"},
     assumptions={
@@ -1363,6 +1379,110 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-25 — M3 part 2a (tag `m3.2a`)
+Section 6.7's k-independent-group, k-related-group, and post-hoc tests:
+`one_way_anova`, `welch_anova`, `alexander_govern`, `kruskal_wallis`,
+`permutation_anova`, `repeated_measures_anova`, `friedman`, `cochran_q`,
+and post-hoc procedures `tukey_hsd`, `games_howell`, `dunn_test`,
+`permutation_posthoc`, `paired_posthoc`, `nemenyi_friedman`,
+`conover_friedman`, `mcnemar_posthoc` (16 functions).
+
+- **New contract type**: `PostHocResult`/`PairwiseComparison` (Section 5)
+  — a post-hoc procedure produces multiple pairwise comparisons per call,
+  which doesn't fit `TestResult`'s one-result shape. Added the same way
+  `DuplicateReport`/`StructureReport`/`LeakageFlag` were for M1. New
+  `FunctionKind` literal `"posthoc"` alongside `test`/`effect`/etc.
+- **R packages** (5 new, none previously installed): `PMCMRplus`
+  (Games-Howell + Friedman post-hoc, one dependency instead of two since
+  you named it for Friedman with no alternative), `FSA` (Dunn's test —
+  installed `dunn.test` too, purely to compare defaults empirically before
+  choosing; `dunn.test` isn't a project dependency), `afex` (repeated-
+  measures ANOVA with GG/HF correction), `DescTools` (Cochran's Q),
+  `onewaytests` (Alexander-Govern). All installed and used at their own
+  package defaults unless noted below.
+- **`generate_r_fixtures.R` had the same class of bug as M3 part 1** twice
+  over: referenced `two_groups_equal_var`/`two_groups_unequal_var` (CSV
+  filenames) instead of the actual R variables `group_equal_var`/
+  `group_unequal_var`; fixed all six call sites. Also hit two real
+  R-package requirements the docs don't make obvious: `PMCMRplus::
+  gamesHowellTest` requires its group column to be an actual factor (a
+  character column fails with "all group levels must be finite", not a
+  type error); `PMCMRplus::frdAllPairsNemenyiTest`/`frdAllPairsConoverTest`
+  require explicit block (subject) rownames on the input matrix or they
+  fail with "number of levels differs". Reran end-to-end; diffed every
+  pre-existing fixture byte-for-byte against a backup taken before the
+  rerun — nothing from M2/M2.1/M2.2/M3-part-1 changed, only the 14 new
+  fixtures were added.
+- **Convention choices made and disclosed** (per your "say which"/"state
+  which" instructions, not asked as questions since each was a named,
+  delegated choice):
+  - Dunn's test: **FSA::dunnTest**, matched at its own default (two-sided
+    p-values, Holm-adjusted) — `dunn.test`'s default is one-sided,
+    unadjusted, confirmed by running both on the same data (FSA's
+    unadjusted p is exactly double dunn.test's reported p). FSA's design
+    (a `method` argument for the adjustment) also matches Section 6.7's
+    own "`dunn_test` (with p-adjust)" framing directly.
+  - `repeated_measures_anova` matches **afex::aov_ez's default** output
+    exactly: primary statistic/df/p_value are Greenhouse-Geisser-corrected
+    (afex's own default), with the uncorrected values, Huynh-Feldt
+    correction (capped at epsilon=1 when >1, matching R's own behavior),
+    and Mauchly's sphericity test (reusing `check_sphericity_mauchly` from
+    M2.1) carried in `validity_notes`. GG/HF epsilon are computed by
+    reading `car:::summary.Anova.mlm`'s source directly (same one that
+    backs afex) and porting its exact formula — eigenvalues of the
+    covariance matrix of Helmert-contrast-transformed scores, reusing
+    `assumptions._helmert_contrasts`, the same orthonormal basis already
+    verified for Mauchly's W.
+  - `one_way_anova`'s two listed effect sizes (η², ω²) don't fit
+    `TestResult`'s one `effect_size` slot the way mann_whitney's
+    rank-biserial/Cliff's-δ pair did in M3 part 1 (those are the *same*
+    number under two names; η² and ω² are genuinely different formulas).
+    Kept η² as the primary `effect_size` (first-listed, most commonly
+    requested by name) and put ω²'s value in `validity_notes`.
+  - `welch_anova`'s ω² is **not** the classical SS-based formula
+    `edacore.effect_sizes.omega_squared` uses for `one_way_anova` —
+    confirmed by reading `effectsize::omega_squared`'s source: for a
+    Welch `htest` object it dispatches to the F-based approximation
+    `max(0, ((F-1)*df1)/(F*df1+df2+1))` using the Welch F/df directly, a
+    genuinely different number from the classical formula on the same
+    data (own module docstring has the reasoning).
+  - `yuen_trimmed_t`'s precedent (M3 part 1: keep a signed statistic,
+    document R's unsigned convention) repeated for `alexander_govern` and
+    is **not** needed for `tukey_hsd`'s statistic, since R's own
+    `TukeyHSD` already reports a signed mean difference.
+- **`conover_friedman` real discrepancy, found and resolved**:
+  scikit-posthocs' `posthoc_conover_friedman` does *not* match
+  `PMCMRplus::frdAllPairsConoverTest`'s default at its own default
+  (`p_adjust=None`) — confirmed the gap isn't explainable by any
+  monotonic p-value adjustment (scikit-posthocs' raw p for one pair was
+  0.742, R's default was 0.988; no adjustment method only ever increases
+  p-values enough to bridge that from the raw value cleanly the way it
+  did for other pairs). Root cause: scikit-posthocs' own `p_adjust`
+  parameter accepts a `'single-step'` option (studentized-range-based,
+  distinct from a post-hoc p.adjust() layer) that exactly reproduces
+  PMCMRplus's default once selected — not a formula difference, a missed
+  parameter. Documented in `conover_friedman`'s docstring; not asked about
+  since it was a diagnosable bug (a parameter to find), not a genuine
+  convention choice.
+- **Real bug found and fixed while testing** (not an R discrepancy — a
+  self-inconsistency within the Python code): `tukey_hsd`'s
+  `group_a`/`group_b` labels didn't match what `estimate` (the mean
+  difference) represented — statsmodels' `meandiffs` is
+  `mean(group_t) - mean(group_c)`, but the comparison was labeled
+  `group_a=group_c, group_b=group_t`, making `estimate` silently equal
+  `mean(group_b) - mean(group_a)` instead of the reverse. A sanity test
+  (`estimate == means[group_a] - means[group_b]`) caught it; fixed by
+  swapping which side maps to `group_a`. Also gave `tukey_hsd` a
+  `PairwiseComparison.ci` (lower/upper) it hadn't had at all, and added
+  `brunner_munzel`-style missing-field coverage: `permutation_posthoc`
+  reports which pairs fell back to Monte Carlo, mirroring M3 part 1's
+  `permutation_test_2s`/`permutation_test_paired`.
+- `cochran_q` needed no separate formula: `DescTools::CochranQTest`
+  delegates directly to `stats::friedman.test` (confirmed by reading its
+  source) — Cochran's Q is exactly Friedman's test applied to binary
+  data, so `cochran_q` calls the same `scipy.stats.friedmanchisquare`
+  path as `friedman`.
 
 ### 2026-09-24 — M3.1.1 (tag `m3.1.1`)
 CI restructuring, ahead of M3 part 2a:

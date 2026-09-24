@@ -20,7 +20,16 @@ from edacore.codegen import render_call
 F = TypeVar("F", bound=Callable[..., Any])
 
 FunctionKind = Literal[
-    "profile", "check", "test", "effect", "transform", "impute", "detect", "viz", "export"
+    "profile",
+    "check",
+    "test",
+    "effect",
+    "posthoc",
+    "transform",
+    "impute",
+    "detect",
+    "viz",
+    "export",
 ]
 
 

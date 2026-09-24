@@ -1,0 +1,1 @@
+{"r_function":"stats::pairwise.t.test(paired=TRUE, p.adjust.method='holm')","data":"repeated_measures_long.csv","comparisons":["t2 - t1","t3 - t1","t4 - t1","t3 - t2","t4 - t2","t4 - t3"],"p_adj":[1,0.07618884396055356,1,0.1977574021130655,1,1]}

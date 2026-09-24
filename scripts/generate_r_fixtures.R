@@ -11,11 +11,12 @@
 #   <name>.json        the R function's output, at full double precision
 #
 # Scope: ARCHITECTURE.md Section 6.6 (assumption checks) and Section 6.8
-# (effect sizes, multiplicity, power) from M2/M2.1, plus Section 6.7's
+# (effect sizes, multiplicity, power) from M2/M2.1; Section 6.7's
 # one-sample, two-independent-group, and two-paired-group hypothesis tests
-# from M3 part 1. The rest of Section 6.7 (k-group, factorial, categorical
-# association, correlation) is later M3 work; add its fixtures alongside
-# that, not here.
+# from M3 part 1; Section 6.7's k-independent-group, k-related-group, and
+# post-hoc tests from M3 part 2a. Factorial, categorical association, and
+# correlation (the rest of Section 6.7) are later M3 work; add fixtures
+# alongside that, not here.
 
 required_packages <- c(
   "jsonlite",       # fixture output
@@ -26,7 +27,12 @@ required_packages <- c(
   "effectsize",     # cohens_d, hedges_g, glass_delta, eta/omega/epsilon^2, ...
   "pwr",            # power analysis
   "WRS2",           # yuen_trimmed_t (M3)
-  "brunnermunzel"   # brunner_munzel (M3)
+  "brunnermunzel",  # brunner_munzel (M3)
+  "PMCMRplus",      # Games-Howell, Friedman post-hoc Nemenyi/Conover (M3 part 2a)
+  "FSA",            # Dunn's test, matched at its default (two-sided, Holm) (M3 part 2a)
+  "afex",           # repeated-measures ANOVA with GG/HF correction (M3 part 2a)
+  "DescTools",      # Cochran's Q (M3 part 2a)
+  "onewaytests"     # Alexander-Govern test (M3 part 2a)
 )
 missing_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly = TRUE)]
 if (length(missing_packages) > 0) {
@@ -767,6 +773,216 @@ write_fixture("permutation_test_paired__small_exact", list(
   data = "permutation_paired_small.csv",
   observed_diff = observed_diff_paired, p_value = perm_p_paired,
   n_permutations = nrow(sign_patterns)
+))
+
+# ---------------------------------------------------------------------------
+# 6.7 Hypothesis tests: k independent groups, k related groups, and their
+# post-hoc tests (M3 part 2a). Reuses three_groups (k independent) and
+# repeated_measures_long/wide (k related) from the M2 section above.
+# ---------------------------------------------------------------------------
+
+## k independent groups ------------------------------------------------------
+
+fit_3g <- aov(value ~ group, data = k_group_df)
+anova_3g <- summary(fit_3g)[[1]]
+write_fixture("one_way_anova__three_groups", list(
+  r_function = "stats::aov", data = "three_groups.csv",
+  statistic = unname(anova_3g["group", "F value"]),
+  df1 = unname(anova_3g["group", "Df"]), df2 = unname(anova_3g["Residuals", "Df"]),
+  p_value = unname(anova_3g["group", "Pr(>F)"])
+))
+
+tukey_3g <- TukeyHSD(fit_3g)$group
+write_fixture("tukey_hsd__three_groups", list(
+  r_function = "stats::TukeyHSD", data = "three_groups.csv",
+  comparisons = rownames(tukey_3g),
+  diff = unname(tukey_3g[, "diff"]), lwr = unname(tukey_3g[, "lwr"]),
+  upr = unname(tukey_3g[, "upr"]), p_adj = unname(tukey_3g[, "p adj"])
+))
+
+kw_3g <- kruskal.test(value ~ group, data = k_group_df)
+write_fixture("kruskal_wallis__three_groups", list(
+  r_function = "stats::kruskal.test", data = "three_groups.csv",
+  statistic = unname(kw_3g$statistic), df = unname(kw_3g$parameter), p_value = kw_3g$p.value
+))
+
+dunn_3g <- FSA::dunnTest(value ~ group, data = k_group_df, method = "holm")$res
+write_fixture("dunn_test__three_groups", list(
+  r_function = "FSA::dunnTest(method='holm')", data = "three_groups.csv",
+  comparisons = dunn_3g$Comparison,
+  statistic = dunn_3g$Z, p_unadj = dunn_3g$P.unadj, p_adj = dunn_3g$P.adj
+))
+
+# Small dataset (3 groups x 3 = 9 obs) for exact-enumeration permutation
+# ANOVA: C(9,3)*C(6,3) = 1680 distinct group assignments, small enough to
+# enumerate completely rather than rely on Monte Carlo (same reasoning as
+# the M3 part 1 two-sample/paired permutation fixtures).
+n_perm_g <- 3
+perm_anova_small <- data.frame(
+  value = round(c(rnorm(n_perm_g, 10, 2), rnorm(n_perm_g, 14, 2), rnorm(n_perm_g, 18, 2)), 2),
+  group = rep(c("A", "B", "C"), each = n_perm_g)
+)
+write_data("permutation_anova_small", perm_anova_small)
+
+f_stat_from_assignment <- function(values, groups) {
+  fit <- aov(values ~ groups)
+  summary(fit)[[1]][["F value"]][1]
+}
+observed_f <- f_stat_from_assignment(perm_anova_small$value, perm_anova_small$group)
+idx_all <- 1:9
+n_extreme <- 0
+n_total <- 0
+for (grpA in combn(idx_all, n_perm_g, simplify = FALSE)) {
+  remaining <- setdiff(idx_all, grpA)
+  for (grpB in combn(remaining, n_perm_g, simplify = FALSE)) {
+    grpC <- setdiff(remaining, grpB)
+    assignment <- character(9)
+    assignment[grpA] <- "A"
+    assignment[grpB] <- "B"
+    assignment[grpC] <- "C"
+    f_perm <- f_stat_from_assignment(perm_anova_small$value, assignment)
+    n_total <- n_total + 1
+    if (f_perm >= observed_f - 1e-10) n_extreme <- n_extreme + 1
+  }
+}
+write_fixture("permutation_anova__small_exact", list(
+  r_function = "manual exact enumeration via combn (no package: C(9,3)*C(6,3)=1680 assignments)",
+  data = "permutation_anova_small.csv",
+  observed_f = observed_f, p_value = n_extreme / n_total, n_permutations = n_total
+))
+
+# Heteroscedastic dataset for welch_anova / alexander_govern / games_howell.
+n_uneq_g <- 15
+k_group_unequal_var <- data.frame(
+  value = c(rnorm(n_uneq_g, 10, 3), rnorm(n_uneq_g, 12, 8), rnorm(n_uneq_g, 15, 15)),
+  group = factor(rep(c("A", "B", "C"), each = n_uneq_g))
+)
+write_data("k_groups_unequal_var", k_group_unequal_var)
+
+wa <- oneway.test(value ~ group, data = k_group_unequal_var, var.equal = FALSE)
+wa_omega2 <- suppressWarnings(effectsize::omega_squared(wa))
+write_fixture("welch_anova__k_groups_unequal_var", list(
+  r_function = "stats::oneway.test(var.equal=FALSE)", data = "k_groups_unequal_var.csv",
+  statistic = unname(wa$statistic), df1 = unname(wa$parameter[1]), df2 = unname(wa$parameter[2]),
+  p_value = wa$p.value, omega_squared = wa_omega2[[1]][1]
+))
+
+ag <- onewaytests::ag.test(value ~ group, data = k_group_unequal_var, verbose = FALSE)
+write_fixture("alexander_govern__k_groups_unequal_var", list(
+  r_function = "onewaytests::ag.test", data = "k_groups_unequal_var.csv",
+  statistic = unname(ag$statistic), df = unname(ag$parameter), p_value = ag$p.value
+))
+
+gh <- PMCMRplus::gamesHowellTest(value ~ group, data = k_group_unequal_var)
+gh_pairs <- expand.grid(row = rownames(gh$p.value), col = colnames(gh$p.value))
+gh_pairs$statistic <- as.vector(gh$statistic)
+gh_pairs$p_value <- as.vector(gh$p.value)
+gh_pairs <- gh_pairs[!is.na(gh_pairs$p_value), ]
+write_fixture("games_howell__k_groups_unequal_var", list(
+  r_function = "PMCMRplus::gamesHowellTest", data = "k_groups_unequal_var.csv",
+  comparisons = paste(gh_pairs$row, "-", gh_pairs$col),
+  statistic = gh_pairs$statistic, p_value = gh_pairs$p_value
+))
+
+## k related groups -----------------------------------------------------------
+
+rm_k_mat <- as.matrix(rm_wide[, c("t1", "t2", "t3", "t4")])
+rownames(rm_k_mat) <- as.character(rm_wide$subject)
+
+rm_fit <- afex::aov_ez(
+  id = "subject", dv = "value", data = rm_long, within = "condition",
+  anova_table = list(es = "pes", correction = "GG")
+)
+rm_gg <- rm_fit$anova_table
+rm_uncorrected <- afex::aov_ez(
+  id = "subject", dv = "value", data = rm_long, within = "condition",
+  anova_table = list(es = "pes", correction = "none")
+)$anova_table
+rm_hf <- suppressWarnings(afex::aov_ez(
+  id = "subject", dv = "value", data = rm_long, within = "condition",
+  anova_table = list(es = "pes", correction = "HF")
+)$anova_table)
+write_fixture("repeated_measures_anova__repeated_measures", list(
+  r_function = "afex::aov_ez", data = "repeated_measures_long.csv",
+  statistic = unname(rm_gg[1, "F"]), pes = unname(rm_gg[1, "pes"]),
+  df1_uncorrected = unname(rm_uncorrected[1, "num Df"]), df2_uncorrected = unname(rm_uncorrected[1, "den Df"]),
+  p_value_uncorrected = unname(rm_uncorrected[1, "Pr(>F)"]),
+  df1_gg = unname(rm_gg[1, "num Df"]), df2_gg = unname(rm_gg[1, "den Df"]),
+  p_value_gg = unname(rm_gg[1, "Pr(>F)"]),
+  df1_hf = unname(rm_hf[1, "num Df"]), df2_hf = unname(rm_hf[1, "den Df"]),
+  p_value_hf = unname(rm_hf[1, "Pr(>F)"])
+))
+
+pw_pt <- pairwise.t.test(
+  rm_long$value, rm_long$condition,
+  paired = TRUE, p.adjust.method = "holm"
+)$p.value
+pw_pairs <- expand.grid(row = rownames(pw_pt), col = colnames(pw_pt))
+pw_pairs$p_adj <- as.vector(pw_pt)
+pw_pairs <- pw_pairs[!is.na(pw_pairs$p_adj), ]
+write_fixture("repeated_measures_posthoc__repeated_measures", list(
+  r_function = "stats::pairwise.t.test(paired=TRUE, p.adjust.method='holm')",
+  data = "repeated_measures_long.csv",
+  comparisons = paste(pw_pairs$row, "-", pw_pairs$col), p_adj = pw_pairs$p_adj
+))
+
+fr <- friedman.test(rm_k_mat)
+write_fixture("friedman__repeated_measures", list(
+  r_function = "stats::friedman.test", data = "repeated_measures_wide.csv",
+  statistic = unname(fr$statistic), df = unname(fr$parameter), p_value = fr$p.value
+))
+
+nem <- PMCMRplus::frdAllPairsNemenyiTest(rm_k_mat)
+nem_pairs <- expand.grid(row = rownames(nem$p.value), col = colnames(nem$p.value))
+nem_pairs$statistic <- as.vector(nem$statistic)
+nem_pairs$p_value <- as.vector(nem$p.value)
+nem_pairs <- nem_pairs[!is.na(nem_pairs$p_value), ]
+write_fixture("nemenyi_friedman__repeated_measures", list(
+  r_function = "PMCMRplus::frdAllPairsNemenyiTest", data = "repeated_measures_wide.csv",
+  comparisons = paste(nem_pairs$row, "-", nem_pairs$col),
+  statistic = nem_pairs$statistic, p_value = nem_pairs$p_value
+))
+
+con <- PMCMRplus::frdAllPairsConoverTest(rm_k_mat)
+con_pairs <- expand.grid(row = rownames(con$p.value), col = colnames(con$p.value))
+con_pairs$statistic <- as.vector(con$statistic)
+con_pairs$p_value <- as.vector(con$p.value)
+con_pairs <- con_pairs[!is.na(con_pairs$p_value), ]
+write_fixture("conover_friedman__repeated_measures", list(
+  r_function = "PMCMRplus::frdAllPairsConoverTest", data = "repeated_measures_wide.csv",
+  comparisons = paste(con_pairs$row, "-", con_pairs$col),
+  statistic = con_pairs$statistic, p_value = con_pairs$p_value
+))
+
+# Binary repeated-measures dataset for cochran_q + pairwise McNemar post-hoc.
+n_cq <- 25
+set.seed(20260101 + 1)
+cochran_binary <- data.frame(
+  t1 = rbinom(n_cq, 1, 0.5),
+  t2 = rbinom(n_cq, 1, 0.65),
+  t3 = rbinom(n_cq, 1, 0.35)
+)
+write_data("cochran_q_binary", cochran_binary)
+
+cq <- DescTools::CochranQTest(as.matrix(cochran_binary))
+write_fixture("cochran_q__cochran_q_binary", list(
+  r_function = "DescTools::CochranQTest", data = "cochran_q_binary.csv",
+  statistic = unname(cq$statistic), df = unname(cq$parameter), p_value = cq$p.value
+))
+
+cq_pairs <- combn(colnames(cochran_binary), 2, simplify = FALSE)
+mcn_stat <- sapply(cq_pairs, function(p) {
+  mcnemar.test(table(cochran_binary[[p[1]]], cochran_binary[[p[2]]]), correct = TRUE)$statistic
+})
+mcn_p <- sapply(cq_pairs, function(p) {
+  mcnemar.test(table(cochran_binary[[p[1]]], cochran_binary[[p[2]]]), correct = TRUE)$p.value
+})
+mcn_p_adj <- p.adjust(mcn_p, method = "holm")
+write_fixture("cochran_q_posthoc__cochran_q_binary", list(
+  r_function = "stats::mcnemar.test(correct=TRUE) pairwise + p.adjust(method='holm')",
+  data = "cochran_q_binary.csv",
+  comparisons = sapply(cq_pairs, paste, collapse = " - "),
+  statistic = unname(mcn_stat), p_unadj = unname(mcn_p), p_adj = unname(mcn_p_adj)
 ))
 
 cat("Wrote fixtures to", out_dir, "\n")

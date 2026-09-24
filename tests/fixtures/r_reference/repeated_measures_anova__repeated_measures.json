@@ -1,0 +1,1 @@
+{"r_function":"afex::aov_ez","data":"repeated_measures_long.csv","statistic":1.365063416871105,"pes":0.0538166766799076,"df1_uncorrected":3,"df2_uncorrected":72,"p_value_uncorrected":0.2603501074123818,"df1_gg":1.804633279580333,"df2_gg":43.311198709927993,"p_value_gg":0.2649591479463584,"df1_hf":1.942560018611537,"df2_hf":46.621440446676893,"p_value_hf":0.2651134257378638}

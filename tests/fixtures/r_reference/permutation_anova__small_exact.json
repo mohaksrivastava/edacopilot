@@ -1,0 +1,1 @@
+{"r_function":"manual exact enumeration via combn (no package: C(9,3)*C(6,3)=1680 assignments)","data":"permutation_anova_small.csv","observed_f":14.931514712711971,"p_value":0.003571428571428571,"n_permutations":1680}
