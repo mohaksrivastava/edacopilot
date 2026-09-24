@@ -364,7 +364,8 @@ def permutation_test_2s(
     n1, n2 = len(x), len(y)
 
     def _mean_diff(a: np.ndarray, b: np.ndarray, axis: int = -1) -> np.ndarray:
-        return np.mean(a, axis=axis) - np.mean(b, axis=axis)
+        result: np.ndarray = np.mean(a, axis=axis) - np.mean(b, axis=axis)
+        return result
 
     n_arr = n_arrangements_two_sample(n1, n2)
     mode: PermMode = "exact" if n_arr <= MAX_EXACT_PERMUTATIONS else "monte_carlo"
@@ -627,7 +628,8 @@ def permutation_test_paired(
     n = len(x)
 
     def _mean_diff(a_arr: np.ndarray, b_arr: np.ndarray, axis: int = -1) -> np.ndarray:
-        return np.mean(a_arr - b_arr, axis=axis)
+        result: np.ndarray = np.mean(a_arr - b_arr, axis=axis)
+        return result
 
     n_arr = n_arrangements_paired(n)
     mode: PermMode = "exact" if n_arr <= MAX_EXACT_PERMUTATIONS else "monte_carlo"
