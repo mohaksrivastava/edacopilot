@@ -1,0 +1,4 @@
+# Normalize line endings: LF in the repository regardless of platform.
+# Windows git (autocrlf) and the Windows R install write CRLF to the working
+# tree; without this, WSL/Linux git reports every such file as modified.
+* text=auto eol=lf
