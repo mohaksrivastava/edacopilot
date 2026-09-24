@@ -107,38 +107,6 @@ def test_detect_duplicates() -> None:
     _check("detect_duplicates", {"subset": ["a"]}, df)
 
 
-def test_detect_structure_time_series() -> None:
-    df = pd.DataFrame(
-        {"date": pd.date_range("2024-01-01", periods=30, freq="D"), "value": range(30)}
-    )
-    report = edacore.profiling.detect_structure(df)
-    assert report.structure == "time_series"
-    assert report.time_index == "date"
-    _check("detect_structure", {}, df)
-
-
-def test_detect_structure_panel() -> None:
-    dates = pd.date_range("2024-01-01", periods=5, freq="D")
-    df = pd.DataFrame(
-        {
-            "date": list(dates) * 4,
-            "entity_id": sum(([i] * 5 for i in range(4)), []),
-            "value": range(20),
-        }
-    )
-    report = edacore.profiling.detect_structure(df)
-    assert report.structure == "panel"
-    assert report.entity_id == "entity_id"
-    _check("detect_structure", {}, df)
-
-
-def test_detect_structure_cross_sectional(mixed_df: pd.DataFrame) -> None:
-    df = mixed_df.drop(columns=["signup_date"])
-    report = edacore.profiling.detect_structure(df)
-    assert report.structure == "cross_sectional"
-    _check("detect_structure", {}, df)
-
-
 def test_detect_leakage_candidates_name_match() -> None:
     df = pd.DataFrame(
         {

@@ -361,6 +361,28 @@ class TransformRecord(BaseModel):
     warnings: list[str]
 ```
 
+Section 6.1 names three more return types (`DuplicateReport`, `StructureReport`,
+`list[LeakageFlag]`) that this section didn't originally spell out. Added during M1:
+```python
+class DuplicateReport(BaseModel):
+    n_exact: int
+    exact_duplicate_indices: list[int]
+    key_columns: list[str] | None    # None if detect_duplicates was called with subset=None
+    n_key_duplicates: int; key_duplicate_indices: list[int]
+
+class StructureReport(BaseModel):
+    structure: Literal["cross_sectional", "time_series", "panel", "repeated_measures", "unknown"]
+    time_index: str | None; entity_id: str | None
+    confidence: float
+    reasons: list[str]              # human-readable evidence for the verdict
+
+class LeakageFlag(BaseModel):
+    column: str
+    reason: str                     # e.g. "near-perfect correlation with target (r=0.997)"
+    method: str                     # "name_match" | "pearson_correlation" | "perfect_predictability"
+    score: float | None             # e.g. the correlation, when the method produces one
+```
+
 ### 5.4 Function registry
 Every public `edacore` function is registered:
 ```python
@@ -1323,3 +1345,60 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 - JupyterLab sidebar extension and "insert code cell into the current notebook".
 - Polars backend for larger data.
 - Regression modelling beyond EDA diagnostics.
+
+---
+
+## 18. Changelog
+
+Newest first. One entry per milestone (or per round of fixes against an
+already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-24 — M1.1 (tag `m1.1`)
+- Reconciled `registry.list(stage="profile")` against Section 6.1: all 17
+  functions present, nothing missing.
+- Added false-positive tests: a clean dataset produces zero flags; a wide
+  integer range (age 18-65) isn't flagged ordinal; genuine zeros aren't
+  flagged as sentinels; a strong-but-noisy predictor (r≈0.87) isn't flagged
+  as leakage.
+- Added `detect_structure` scenario tests for all three repeating-entity
+  shapes: a single time series, panel data, and repeated IDs across groups
+  with no time index (repeated_measures).
+- Added a CI leg pinning the declared dependency floors (`pandas==2.2.0`,
+  `numpy==1.26.0`, `scipy==1.13.0`, `statsmodels==0.14.0`) rather than only
+  ever testing against latest.
+- Added `numpy` as an explicit dependency (was only transitive) with the
+  1.26.0 floor pandas 2.2.0 itself requires on Python >=3.12.
+- Set mypy's `python_version` to 3.12 (the actual minimum that parses
+  numpy's PEP 695 stub syntax; was overcautiously set to 3.13 in M1).
+- Documented `DuplicateReport`, `StructureReport`, `LeakageFlag` in
+  Section 5.3 — Section 6.1 named them as return types but Section 5 never
+  defined them.
+
+### 2026-09-24 — M1 (tag `m1`)
+- `edacore.profiling`: all 17 Section 6.1 functions implemented and
+  registered with code templates (`profile_dataset`, `infer_semantic_types`,
+  eight `detect_*` functions, four `summarize_*` functions).
+- Trap scenarios `ordinal_as_numeric`, `sentinel_missing`, `target_leakage`,
+  `duplicate_rows`, `pii_present` (Section 15.3) detected, each via a
+  seeded generator in `tests/scenarios/generators.py`.
+- Fixed for pandas 3.0's new default string dtype, which silently broke
+  every `dtype == object` check.
+
+### 2026-09-24 — M0 gap-closing (tag `m0`, same commit range)
+- Added `tests/helpers/codegen_check.py` (`assert_codegen_matches`): execs
+  `registry.to_code(...)` against a fixture DataFrame and checks it equals
+  calling the function directly.
+- Added `model_dump`/`model_validate` round-trip tests for every Section 5
+  model and enum.
+- Confirmed `registry.json_schema()` and `registry.list(stage, kind, tags)`
+  with combined-filter tests.
+- Added a `pip-licenses --fail-on="GPL"` CI step (rule 8: no GPL-family
+  dependencies).
+
+### 2026-09-24 — M0 (tag `m0`)
+- Repo scaffolding: `src/edacore` + `src/edacopilot` layout, pyproject with
+  extras, CI (ruff, mypy, pytest), pre-commit, Apache-2.0 license.
+- `edacore.contracts`: the nine Section 5 models/enums, frozen.
+- `edacore.registry`: `@register`, `FunctionSpec`, `get`/`list`/
+  `json_schema`/`to_code`.
+- `edacore.codegen`: `render_call()`.
