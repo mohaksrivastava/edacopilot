@@ -1,0 +1,1 @@
+{"r_function":"stats::cor.test(method='spearman') (exact=NULL -> C_pRho, no ties)","data":"rank_corr_n9.csv","estimate":0.2666666666666667,"statistic_S":88,"p_value":0.4933311287477954}

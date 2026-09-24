@@ -1,13 +1,13 @@
-"""edacore.stattests.categorical vs R. Documented departures: fisher_exact
-r x c p-value (scipy's exact convention differs from R's), and the fisher
+"""edacore.stattests.categorical vs R. Documented departure: the fisher
 2x2 conditional-MLE odds ratio compared at 1e-4 (two root-finders, same
 estimand)."""
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
-import scipy
+from scipy import stats
 
 import edacore
 from edacore.registry import registry
@@ -48,23 +48,45 @@ def test_fisher_exact_2x2_matches_r_conditional_mle() -> None:
     assert_codegen_matches(
         registry,
         "fisher_exact",
-        {"a": "exposure", "b": "outcome", "nan_policy": "omit"},
+        {"a": "exposure", "b": "outcome", "random_state": 0, "nan_policy": "omit"},
         df,
         namespace=_NS,
     )
 
 
-_SCIPY = tuple(int(x) for x in scipy.__version__.split(".")[:2])
-
-
-@pytest.mark.skipif(_SCIPY < (1, 15), reason="r x c fisher_exact needs scipy>=1.15")
-def test_fisher_exact_rxc_is_exact_but_documented_to_differ_from_r() -> None:
+def test_fisher_exact_rxc_matches_r_exact_and_is_deterministic() -> None:
     df, r = expanded("contingency_3x3"), ref("fisher_exact__contingency_3x3")
     res = cat.fisher_exact(df, "row", "col")
-    assert res.p_value is not None and 0 < res.p_value <= 1
-    assert res.p_value != pytest.approx(r["p_value"], rel=1e-3)  # documented divergence
-    assert any("r x c" in w for w in res.warnings)
+    assert res.p_value == pytest.approx(r["p_value"], rel=1e-9)
+    assert cat.fisher_exact(df, "row", "col").p_value == res.p_value
+    assert any("exact p-value by full enumeration" in w for w in res.warnings)
     assert res.effect_size is None
+    assert_codegen_matches(
+        registry,
+        "fisher_exact",
+        {"a": "row", "b": "col", "random_state": 0, "nan_policy": "omit"},
+        df,
+        namespace=_NS,
+    )
+
+
+def test_fisher_exact_rxc_enumeration_agrees_with_scipy_full_permutation() -> None:
+    # Independent check: scipy's PermutationMethod(n_resamples=inf) enumerates
+    # all 7! pairings of the raw observations (its own exact path).
+    table = np.array([[2, 1, 0], [0, 2, 0], [1, 0, 1]])
+    ours = cat._fisher_rxc_exact_p(table)
+    theirs = stats.fisher_exact(table, method=stats.PermutationMethod(n_resamples=np.inf))
+    assert ours == pytest.approx(float(theirs.pvalue), rel=1e-9)
+
+
+def test_fisher_exact_rxc_monte_carlo_fallback_is_seeded_and_disclosed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cat, "MAX_FISHER_TABLES", 10)
+    df = expanded("contingency_3x3")
+    first = cat.fisher_exact(df, "row", "col", random_state=1)
+    assert cat.fisher_exact(df, "row", "col", random_state=1).p_value == first.p_value
+    assert any("Monte Carlo" in w and "random_state=1" in w for w in first.warnings)
 
 
 def test_g_test_matches_r_default_no_correction() -> None:
@@ -146,9 +168,3 @@ def test_mcnemar_asymmetric_matches_r_reference_formula() -> None:
     res = cat.mcnemar(data("cochran_q_binary"), "t1", "t2")
     assert res.statistic == pytest.approx(r["statistic"][0], rel=1e-9)
     assert res.p_value == pytest.approx(r["p_unadj"][0], rel=1e-9)
-
-
-@pytest.mark.skipif(_SCIPY >= (1, 15), reason="only applies below scipy 1.15")
-def test_fisher_exact_rxc_raises_clear_error_on_old_scipy() -> None:
-    with pytest.raises(ValueError, match="scipy>=1.15"):
-        cat.fisher_exact(expanded("contingency_3x3"), "row", "col")

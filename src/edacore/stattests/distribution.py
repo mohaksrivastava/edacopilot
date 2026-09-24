@@ -5,7 +5,9 @@ Verified against R (tests/fixtures/r_reference/).
   kSamples::ad.test (version 2, midrank/bias-corrected) and matches R.
   scipy's *p-value* is interpolated from a critical-value table and
   capped to [0.001, 0.25]; R's asymptotic p-value is not (e.g. 1e-13 on
-  the module's own fixture). Capped values are disclosed in `warnings`.
+  the module's own fixture). When the cap is hit, the p-value is replaced
+  by a seeded permutation p-value (9999 resamples; resolution 1e-4, so it
+  cannot reproduce R's 1e-13 either), disclosed in `warnings`.
 - tost_equivalence: bounds are RAW (same units as the outcome), matching
   TOSTER::t_TOST's default `eqbound_type="raw"`, not standardized
   (Cohen's d) bounds. Overall p-value is max(p_lower, p_upper).
@@ -28,6 +30,10 @@ from edacore.stattests._shared import NanPolicy
 from edacore.stattests.k_independent import _clean_k_groups
 from edacore.stattests.two_sample import _clean_groups
 
+# scipy's anderson_ksamp interpolates its p-value within this range only.
+_AD_P_FLOOR, _AD_P_CEILING = 0.001, 0.25
+_AD_N_RESAMPLES = 9999
+
 
 @register(
     name="anderson_ksamp",
@@ -38,12 +44,19 @@ from edacore.stattests.two_sample import _clean_groups
     estimand="whether k samples come from a common distribution",
     code_template=(
         "edacore.stattests.distribution.anderson_ksamp("
-        "{df}, outcome={outcome!r}, group={group!r}, nan_policy={nan_policy!r})"
+        "{df}, outcome={outcome!r}, group={group!r}, random_state={random_state}, "
+        "nan_policy={nan_policy!r})"
     ),
 )
 def anderson_ksamp(
-    df: pd.DataFrame, outcome: str, group: str, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame,
+    outcome: str,
+    group: str,
+    random_state: int = 0,
+    nan_policy: NanPolicy = "omit",
 ) -> TestResult:
+    """`random_state` seeds the permutation p-value used only when the
+    asymptotic one hits scipy's [0.001, 0.25] cap."""
     warnings: list[str] = []
     clean = _clean_k_groups(df, outcome, group, nan_policy, warnings)
     samples = [g[outcome].to_numpy(dtype=float) for _, g in clean.groupby(group, observed=True)]
@@ -52,11 +65,19 @@ def anderson_ksamp(
         _warnings.simplefilter("ignore")
         result = stats.anderson_ksamp(samples)
     p_value = float(result.pvalue)
-    if p_value <= 0.001 or p_value >= 0.25:
+    if p_value <= _AD_P_FLOOR or p_value >= _AD_P_CEILING:
+        method = stats.PermutationMethod(
+            n_resamples=_AD_N_RESAMPLES, rng=np.random.default_rng(random_state)
+        )
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore")
+            p_value = float(stats.anderson_ksamp(samples, method=method).pvalue)
         warnings.append(
-            f"p-value {p_value} is capped: scipy interpolates from a critical-value table "
-            "limited to [0.001, 0.25]; the true asymptotic p-value lies beyond that bound "
-            "(R's kSamples::ad.test reports it uncapped)"
+            f"asymptotic p-value hit scipy's cap ({float(result.pvalue)}; its table only "
+            f"covers [{_AD_P_FLOOR}, {_AD_P_CEILING}]), so the p-value is from "
+            f"{_AD_N_RESAMPLES} permutations (random_state={random_state}); smallest "
+            f"reportable value {1 / (_AD_N_RESAMPLES + 1):.0e}. R's kSamples::ad.test "
+            "reports the uncapped asymptotic p-value instead"
         )
 
     return TestResult(

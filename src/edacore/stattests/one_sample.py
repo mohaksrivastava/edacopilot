@@ -237,6 +237,9 @@ def binomial_test(
 )
 def chi2_goodness_of_fit(df: pd.DataFrame, col: str, expected: dict[str, float]) -> TestResult:
     """`expected` maps category -> expected proportion (must sum to 1)."""
+    total = sum(expected.values())
+    if not np.isclose(total, 1.0):
+        raise ValueError(f"expected proportions must sum to 1, got {total}")
     observed_counts = df[col].value_counts()
     categories = list(expected.keys())
     observed = np.array([float(observed_counts.get(c, 0)) for c in categories])

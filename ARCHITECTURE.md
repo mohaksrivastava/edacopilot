@@ -168,7 +168,7 @@ Everything else is deterministic. Every call has a deterministic fallback (Secti
 |---|---|---|
 | Language | Python ≥ 3.11 | |
 | DataFrames | `pandas` ≥ 2.2 (pyarrow backend) | Polars support deferred to v2 |
-| Stats | `scipy` ≥ 1.13, `statsmodels` ≥ 0.14 | Core of all tests |
+| Stats | `scipy` ≥ 1.15, `statsmodels` ≥ 0.14 | Core of all tests |
 | ML utilities | `scikit-learn` | Imputers, isolation forest, LOF, MCD, mutual info |
 | Post-hoc tests | `scikit-posthocs` (MIT) | Dunn, Nemenyi |
 | Change points | `ruptures` (BSD) | Optional extra `[timeseries]` |
@@ -673,7 +673,7 @@ All return `TestResult` including effect size with CI (bootstrap if no analytic 
 | Function | Hard | Persona | Effect size |
 |---|---|---|---|
 | `chi2_independence(a, b)` | expected counts OK | P, C | Cramér's V (bias-corrected) |
-| `fisher_exact(a, b)` | 2×2 (or r×c via simulation) | P, C | odds ratio + CI |
+| `fisher_exact(a, b)` | 2×2, or r×c (exact enumeration; seeded Monte Carlo above 2M tables) | P, C | odds ratio + CI (2×2 only) |
 | `g_test(a, b)` | expected counts OK | M | Cramér's V |
 | `mcnemar(a, b)` | paired binary | All | odds ratio |
 | `two_proportion_z(outcome, group)` | binary, n·p ≥ 10 | C | risk difference, Cohen's h |
@@ -1408,6 +1408,81 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-24 — M3.3 (tag `m3.3`)
+Pre-M4 fixes. Development moved to WSL2 (Python 3.11 venv `.venv-wsl`,
+Windows R called from WSL).
+
+- **Line endings**: added `.gitattributes` (`* text=auto eol=lf`). Windows
+  git (autocrlf) and the Windows R install write CRLF, which WSL git
+  reported as 142 modified files with no content change.
+- **Spearman**: implemented R's `C_pRho` (AS 89, Best & Roberts 1975) from
+  the published algorithm. That means full enumeration of the null
+  distribution of S for n<=9, the Edgeworth series for 9<n<=1290, and R's
+  `round(q) + 2*lower_tail` convention. Previously an n!-bounded
+  permutation enumeration (n<=8) plus scipy's t approximation. Now matches
+  `cor.test` to <=4e-15 relative at n=8, 9, 20, 49, 100 (new fixtures
+  `spearman__rank_corr_n{9,20,49,100}`); the old code was off by up to
+  1.1% (n=9). `statistic` is now R's S (was rho, duplicating `estimate`),
+  per the M3 part 2b statistic-field convention. R's `prho.c` is GPL-2+:
+  the implementation follows the published algorithm, not R's C code.
+- **Kendall**: exact null distribution of T via
+  `scipy.stats.kendalltau(method="exact")` for n<50 without ties,
+  reporting `statistic` = T as R does; otherwise z with R's tie-corrected
+  variance, and the p-value computed from that z. Matches `cor.test` to
+  <=4e-15 at n=9, 20, 49 (exact) and 100 (normal); the old code was off
+  by up to 1.7% (n=49).
+- **scipy floor 1.13 -> 1.15** (1.15.0: January 2025, >12 months old).
+  The r×c Fisher skip and the "needs scipy>=1.15" error path are removed.
+  The full fast suite passes against the exact floor pins (numpy 1.26.0,
+  pandas 2.2.0, scipy 1.15.0, statsmodels 0.14.0; 297 tests, 0 skipped).
+  The `anderson(method=...)` fallback stays (scipy 1.17 is <12 months).
+- **Fisher r×c: real bug, and M3 part 2b's diagnosis was wrong.** scipy's
+  r×c `fisher_exact` is *not* exact: it defaults to an unseeded
+  `MonteCarloMethod` (9999 draws). Repeated calls on the 3×3 fixture gave
+  0.0001-0.0005, so the p-value was non-reproducible (rule 7). The old
+  "must differ from R" test passed by luck: at p=0.0001 the relative gap
+  to R was 1.4e-3, just outside its 1e-3 margin. The "different exact
+  conventions" explanation in the m3.2b entry below, and your decision
+  based on it, rested on that misreading. Your tolerance hypothesis: R's
+  r×c path (FEXACT) uses `tol = 3.45254e-7` on the log path length, i.e.
+  P(table) <= P(obs)·exp(3.45e-7). The 1+1e-7 `relErr` is R's 2×2
+  branch. Tolerance was not the cause of the 0.0002 vs 0.0001001 gap.
+  Fix: `_fisher_rxc_exact_p` enumerates every table with the observed
+  margins and applies R's FEXACT tolerance. It matches R to ~1e-12,
+  agrees with scipy's own exact `PermutationMethod` on a small table, and
+  takes 0.05 s for the fixture (356,481 tables). Above
+  `MAX_FISHER_TABLES` (2M) it falls back to a seeded Monte Carlo p-value
+  (new `random_state` parameter), disclosed in `warnings`.
+- **anderson_ksamp**: scipy 1.15 accepts `method=PermutationMethod`. When
+  the asymptotic p-value hits scipy's cap (<=0.001 or >=0.25), it is
+  replaced by a seeded 9999-resample permutation p-value (new
+  `random_state` parameter), disclosed. Fixture: 1e-4 (the resolution
+  floor) instead of 0.001; R's asymptotic value is 1e-13, so it still
+  can't match R there. At the upper cap the gain is large: null data
+  gave scipy's 0.25 vs a permutation p of 0.92.
+- **mutual_information: two real bugs**, found by the new sklearn
+  comparison (sklearn now imports locally):
+  1. The KSG max-norm neighbourhoods are not scale-invariant. Scaling x
+     by 1000 at rho=0.7 took the estimate from 0.35 to 0.05 nats (true:
+     0.34). Now each variable is scaled to unit variance, as sklearn does.
+  2. Tied values (e.g. Likert data) made a radius <= 0 and returned
+     MI = **inf**. Now seeded 1e-10 jitter (new `random_state`), as
+     Kraskov et al. and sklearn do, with a warning that KSG assumes
+     continuous data; a constant column raises.
+
+  It now matches `sklearn.feature_selection.mutual_info_regression` to
+  <=1e-15 (16 CI cases: rho 0-0.95, x scale 1 and 1000, k 3 and 5).
+- `chi2_goodness_of_fit`: `expected` proportions not summing to 1 now
+  raise a clear error (was an obscure scipy error, found by the audit).
+- **M3 acceptance audit** (`docs/m3_effect_size_audit.md`): Section 16's
+  "every test returns effect size + CI" is **not met**. 9 of 45 do. Of
+  the rest, 7 only need an existing, R-verified CI wired into
+  `effect_size_ci`, 20 need a new CI (each with an R reference named), and
+  9 have no standard effect size or CI (proposed exempt). Also found:
+  `welch_t` labels its effect size `hedges_g` but returns Cohen's d_av
+  without the J correction. Remediation is pending your decisions and
+  not done in m3.3.
 
 ### 2026-09-25 — M3 part 2b (tag `m3.2b`)
 Section 6.7's factorial, categorical association, correlation, and

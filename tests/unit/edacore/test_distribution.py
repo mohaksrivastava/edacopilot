@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 import edacore
 from edacore.registry import registry
@@ -15,32 +18,47 @@ _NS = {"edacore": edacore}
 dist = edacore.stattests.distribution
 
 
-def test_anderson_ksamp_statistic_matches_r_and_capping_is_disclosed() -> None:
+def test_anderson_ksamp_statistic_matches_r_and_capped_p_uses_permutation() -> None:
     df, r = data("anderson_ksamp_data"), ref("anderson_ksamp__anderson_ksamp_data")
     res = dist.anderson_ksamp(df, "value", "group")
     # R's fixture stores its printed matrix, rounded to 3 decimals.
     assert res.statistic == pytest.approx(r["tav2_v2"], abs=1e-3)
-    # scipy caps at 0.001; R's true p is ~1e-13. Must be disclosed.
-    assert res.p_value == 0.001 and r["p_value_v2"] < 1e-10
-    assert any("capped" in w for w in res.warnings)
+    # Asymptotic p hits scipy's 0.001 floor (R's is ~1e-13); the permutation
+    # p-value replaces it. Groups are 6 SDs apart, so no resample reaches the
+    # observed statistic: p = 1/(9999+1), still far above R's value.
+    assert r["p_value_v2"] < 1e-10
+    assert res.p_value == pytest.approx(1 / 10_000)
+    assert any("9999 permutations" in w and "0.001" in w for w in res.warnings)
+    assert dist.anderson_ksamp(df, "value", "group").p_value == res.p_value
     assert_codegen_matches(
         registry,
         "anderson_ksamp",
-        {"outcome": "value", "group": "group", "nan_policy": "omit"},
+        {"outcome": "value", "group": "group", "random_state": 0, "nan_policy": "omit"},
         df,
         namespace=_NS,
     )
 
 
-def test_anderson_ksamp_uncapped_pvalue_has_no_cap_warning() -> None:
-    rng = np.random.default_rng(0)
-    df = pd.DataFrame({"v": rng.normal(size=90), "g": np.repeat(["a", "b", "c"], 30)})
-    res = dist.anderson_ksamp(df, "v", "g")
-    p = res.p_value or 0.0
-    if 0.001 < p < 0.25:
-        assert not any("capped" in w for w in res.warnings)
-    else:
-        assert any("capped" in w for w in res.warnings)
+def test_anderson_ksamp_upper_cap_replaced_and_interior_p_kept() -> None:
+    rng = np.random.default_rng(1)
+    null = pd.DataFrame({"v": rng.normal(size=90), "g": np.repeat(["a", "b", "c"], 30)})
+    samples = [null.v[null.g == k].to_numpy() for k in "abc"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert stats.anderson_ksamp(samples).pvalue == 0.25  # scipy's upper cap
+    res = dist.anderson_ksamp(null, "v", "g")
+    assert res.p_value is not None and res.p_value > 0.25
+    assert any("permutations" in w for w in res.warnings)
+
+    shifted = null.assign(v=null.v + np.where(null.g == "c", 0.6, 0.0))
+    samples = [shifted.v[shifted.g == k].to_numpy() for k in "abc"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        interior = stats.anderson_ksamp(samples).pvalue
+    assert 0.001 < interior < 0.25
+    res = dist.anderson_ksamp(shifted, "v", "g")
+    assert res.p_value == pytest.approx(interior)
+    assert not any("permutations" in w for w in res.warnings)
 
 
 def _two_group(name: str) -> pd.DataFrame:

@@ -240,3 +240,9 @@ def test_bootstrap_one_sample_rejects_unknown_stat() -> None:
     df = _data("normal_sample")
     with pytest.raises(ValueError, match="stat must be"):
         edacore.stattests.one_sample.bootstrap_one_sample(df, "x", stat="mode")
+
+
+def test_chi2_goodness_of_fit_rejects_proportions_not_summing_to_one() -> None:
+    df = pd.DataFrame({"c": ["a", "b", "b", "c"]})
+    with pytest.raises(ValueError, match="must sum to 1"):
+        edacore.stattests.one_sample.chi2_goodness_of_fit(df, "c", {"a": 1, "b": 1, "c": 1})

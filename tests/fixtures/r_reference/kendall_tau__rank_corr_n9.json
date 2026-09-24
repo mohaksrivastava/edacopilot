@@ -1,0 +1,1 @@
+{"r_function":"stats::cor.test(method='kendall') (exact iff n<50, no ties)","data":"rank_corr_n9.csv","estimate":0.1666666666666667,"statistic_name":"T","statistic":21,"p_value":0.6122023809523809}

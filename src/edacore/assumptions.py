@@ -44,8 +44,8 @@ def _anderson_darling_normal(x: np.ndarray) -> tuple[float, float]:
     """(statistic, p_value) for the Anderson-Darling normality test.
 
     scipy's `method="interpolate"` kwarg (which gives a p-value directly)
-    was added after our declared scipy floor (>=1.13 — verified against
-    the min-version CI leg, which pins exactly 1.13.0 and doesn't have
+    was added after our declared scipy floor (>=1.15 — verified against
+    the min-version CI leg, which pins exactly 1.15.0 and doesn't have
     it). Falls back to interpolating scipy's own significance-level /
     critical-value table for older scipy, so this works across the whole
     declared range rather than raising the floor for one convenience

@@ -14,9 +14,9 @@ dependencies = [
   "pandas>=2.2",
   # numpy is used directly (edacore.profiling), not just transitively. 1.26.0
   # is pandas 2.2.0's own floor for Python >=3.12, the binding constraint
-  # across our supported Python range (also above scipy 1.13.0's 1.22.4 floor).
+  # across our supported Python range (also above scipy 1.15.0's 1.23.5 floor).
   "numpy>=1.26.0",
-  "scipy>=1.13",
+  "scipy>=1.15",
   "statsmodels>=0.14",
   "scikit-learn",
   "scikit-posthocs",

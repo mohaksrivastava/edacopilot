@@ -6,6 +6,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 import edacore
 from edacore.registry import registry
@@ -45,12 +46,41 @@ def test_spearman_exact_matches_r_small_n_no_ties() -> None:
     )
 
 
-def test_spearman_falls_back_to_asymptotic_for_large_n_and_says_so() -> None:
-    rng = np.random.default_rng(0)
-    df = pd.DataFrame({"x": rng.normal(size=30)})
-    df["y"] = df["x"] + rng.normal(size=30)
+@pytest.mark.parametrize("n", [9, 20, 49, 100])
+def test_spearman_matches_r_prho_across_regimes(n: int) -> None:
+    # n=9: C_pRho's exact enumeration; n>9: AS 89 Edgeworth series.
+    df, r = data(f"rank_corr_n{n}"), ref(f"spearman__rank_corr_n{n}")
     res = cor.spearman(df, "x", "y")
-    assert any("too large" in w for w in res.warnings)
+    assert res.estimate == pytest.approx(r["estimate"], rel=1e-9)
+    assert res.statistic == pytest.approx(r["statistic_S"], rel=1e-9)
+    assert res.p_value == pytest.approx(r["p_value"], rel=1e-9)
+    assert any(("exact" if n <= 9 else "AS 89") in w for w in res.warnings)
+
+
+@pytest.mark.parametrize("n", [9, 20, 49, 100])
+def test_kendall_matches_r_exact_below_50_normal_above(n: int) -> None:
+    df, r = data(f"rank_corr_n{n}"), ref(f"kendall_tau__rank_corr_n{n}")
+    res = cor.kendall_tau(df, "x", "y")
+    assert res.statistic_name == r["statistic_name"]  # T (exact) or z
+    assert res.estimate == pytest.approx(r["estimate"], rel=1e-9)
+    assert res.statistic == pytest.approx(r["statistic"], rel=1e-9)
+    assert res.p_value == pytest.approx(r["p_value"], rel=1e-9)
+
+
+def test_spearman_ties_use_t_approximation_and_say_so() -> None:
+    df = data("correlation_with_ties")
+    res = cor.spearman(df, "x", "y")
+    assert res.p_value == pytest.approx(stats.spearmanr(df["x"], df["y"]).pvalue, rel=1e-12)
+    assert any("ties present" in w for w in res.warnings)
+
+
+def test_prho_exact_tails_are_complementary() -> None:
+    # P[S >= s] + P[S < s] = 1 over the enumerated null, every attainable s.
+    for n in (3, 5, 9):
+        for s in range(0, n * (n * n - 1) // 3 + 3, 2):
+            upper = cor._prho(n, s, lower_tail=False)
+            lower = cor._prho(n, s, lower_tail=True)
+            assert upper + lower == pytest.approx(1.0)
 
 
 def test_kendall_tau_b_with_ties_matches_r() -> None:
@@ -151,6 +181,36 @@ def test_mutual_information_matches_analytic_bivariate_normal(rho: float) -> Non
     assert res.estimate == pytest.approx(-0.5 * np.log(1 - rho**2), abs=0.05)
 
 
+@pytest.mark.parametrize("rho", [0.0, 0.3, 0.7, 0.95])
+@pytest.mark.parametrize("x_scale", [1.0, 1000.0])
+@pytest.mark.parametrize("k", [3, 5])
+def test_mutual_information_matches_sklearn(rho: float, x_scale: float, k: int) -> None:
+    # Same algorithm (KSG 1, max-norm) and preprocessing (unit-variance
+    # scaling); only the 1e-10 jitter draws differ, which cannot reorder
+    # neighbours in continuous data. x_scale=1000 guards scale invariance.
+    from sklearn.feature_selection import mutual_info_regression
+
+    rng = np.random.default_rng(6)
+    xy = rng.multivariate_normal([0, 0], [[1, rho], [rho, 1]], 800)
+    df = pd.DataFrame({"x": xy[:, 0] * x_scale, "y": xy[:, 1]})
+    ours = cor.mutual_information(df, "x", "y", k=k).estimate
+    theirs = mutual_info_regression(
+        df[["x"]].to_numpy(), df["y"].to_numpy(), n_neighbors=k, random_state=0
+    )[0]
+    assert ours == pytest.approx(theirs, rel=1e-9, abs=1e-12)
+
+
+def test_mutual_information_ties_are_finite_and_disclosed() -> None:
+    rng = np.random.default_rng(7)
+    x = rng.integers(1, 6, 300).astype(float)  # Likert-like: heavy ties
+    df = pd.DataFrame({"x": x, "y": x + rng.integers(0, 3, 300)})
+    res = cor.mutual_information(df, "x", "y")
+    assert res.estimate is not None and np.isfinite(res.estimate) and res.estimate > 0.3
+    assert any("tied values" in w for w in res.warnings)
+    with pytest.raises(ValueError, match="constant"):
+        cor.mutual_information(df.assign(x=1.0), "x", "y")
+
+
 def test_mutual_information_independent_is_near_zero_and_codegen() -> None:
     rng = np.random.default_rng(4)
     df = pd.DataFrame({"x": rng.normal(size=500), "y": rng.normal(size=500)})
@@ -158,7 +218,7 @@ def test_mutual_information_independent_is_near_zero_and_codegen() -> None:
     assert_codegen_matches(
         registry,
         "mutual_information",
-        {"x": "x", "y": "y", "k": 5, "nan_policy": "omit"},
+        {"x": "x", "y": "y", "k": 5, "random_state": 0, "nan_policy": "omit"},
         df,
         namespace=_NS,
     )

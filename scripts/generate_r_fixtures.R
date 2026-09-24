@@ -1233,4 +1233,42 @@ write_fixture("runs_test__runs_test_data", list(
   n1 = runs_r$parameter[["n1"]], n2 = runs_r$parameter[["n2"]], p_value = runs_r$p.value
 ))
 
+# ---------------------------------------------------------------------------
+# M3.3: Spearman/Kendall p-values across R's exact-mode regimes (no ties).
+# Appended last, each dataset under its own seed, so no RNG draw above shifts.
+# Spearman: C_pRho is exact enumeration for n<=9, AS 89 Edgeworth series for
+# 9<n<=1290. Kendall: exact (C_pKendall) for n<50, normal approximation above.
+# ---------------------------------------------------------------------------
+
+rank_corr_cases <- list(
+  list(n = 9, slope = 0.6, seed = 20260101 + 7),
+  list(n = 20, slope = 0.4, seed = 20260101 + 8),
+  list(n = 49, slope = 0.2, seed = 20260101 + 9),
+  list(n = 100, slope = 0.2, seed = 20260101 + 10)
+)
+for (case in rank_corr_cases) {
+  set.seed(case$seed)
+  rc_x <- rnorm(case$n)
+  rc_y <- case$slope * rc_x + rnorm(case$n)
+  stopifnot(!anyDuplicated(rc_x), !anyDuplicated(rc_y))
+  rc_name <- sprintf("rank_corr_n%d", case$n)
+  write_data(rc_name, data.frame(x = rc_x, y = rc_y))
+
+  rc_sp <- cor.test(rc_x, rc_y, method = "spearman")
+  write_fixture(paste0("spearman__", rc_name), list(
+    r_function = "stats::cor.test(method='spearman') (exact=NULL -> C_pRho, no ties)",
+    data = paste0(rc_name, ".csv"),
+    estimate = unname(rc_sp$estimate), statistic_S = unname(rc_sp$statistic),
+    p_value = rc_sp$p.value
+  ))
+
+  rc_kd <- cor.test(rc_x, rc_y, method = "kendall")
+  write_fixture(paste0("kendall_tau__", rc_name), list(
+    r_function = "stats::cor.test(method='kendall') (exact iff n<50, no ties)",
+    data = paste0(rc_name, ".csv"),
+    estimate = unname(rc_kd$estimate), statistic_name = names(rc_kd$statistic),
+    statistic = unname(rc_kd$statistic), p_value = rc_kd$p.value
+  ))
+}
+
 cat("Wrote fixtures to", out_dir, "\n")

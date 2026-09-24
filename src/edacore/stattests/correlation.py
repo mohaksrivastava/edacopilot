@@ -5,19 +5,19 @@ Verified against R (tests/fixtures/r_reference/) except mutual_information
 
 - pearson: CI via Fisher z (scipy's own `pearsonr(...).confidence_interval()`
   already uses this, confirmed matching R's `cor.test` exactly).
-- spearman/kendall_tau: R's `cor.test` computes an EXACT p-value by
-  default for small n without ties (Spearman: AS 89 algorithm, n<1290;
-  Kendall: an exact recursive distribution, n<50); scipy's `spearmanr`
-  has no exact-mode option at all, and `kendalltau`'s `method='auto'`
-  only covers the Kendall case. Confirmed the gap is real (scipy's
-  asymptotic Spearman p-value differs from R's exact one by ~2x on this
-  module's own small-n fixture). Ported exact mode as full permutation
-  enumeration (same MAX_EXACT_PERMUTATIONS threshold used throughout
-  stattests/), verified to match R's exact p-value bit-for-bit on n=8 --
-  but note this covers a narrower n range than R's specialized exact
-  algorithms (n! grows far faster than R's polynomial-time methods), so
-  agreement with R is not guaranteed for every case R itself treats as
-  exact (e.g. n=15, no ties: R is still exact, this module already isn't).
+- spearman: without ties, R's `cor.test` (exact=NULL) calls C_pRho for
+  every n<=1290: full enumeration of the null distribution of
+  S = sum(d^2) for n<=9, and the AS 89 Edgeworth series (Best & Roberts
+  1975, Appl. Statist. 24:377) above that. scipy's `spearmanr` only has
+  the t approximation (~2x off R at n=8), so `_prho` implements AS 89
+  from the published algorithm, with R's calling convention
+  (`round(q) + 2*lower_tail`, two-sided = min(2*tail, 1)). Verified
+  against R at n=8, 9, 20, 49, 100. With ties, or n>1290, R and scipy
+  both use the t approximation.
+- kendall_tau: without ties and n<50, R uses the exact null distribution
+  of the concordance count T; scipy's `kendalltau(method='exact')`
+  computes the same distribution. Otherwise both use the normal
+  approximation with R's tie-corrected variance.
 - odds_ratio-style iterative solves aren't used here; the noncentral-F
   CI machinery is (see effect_sizes.py).
 - partial_correlation: ppcor::pcor.test's general (any number of control
@@ -28,21 +28,18 @@ Verified against R (tests/fixtures/r_reference/) except mutual_information
   Rizzo), verified to ~1e-9. Its own permutation p-value is NOT
   R-comparable (different RNG); tested by simulation behavior instead
   (test_correlation.py), not a fixture.
-- mutual_information: no R reference at all. Estimated via a KSG
-  (Kraskov-Stogbauer-Grassberger 2004) k-NN estimator built directly on
-  `scipy.spatial.cKDTree` -- deliberately NOT
-  `sklearn.feature_selection.mutual_info_regression`, which hit a blocked
-  compiled dependency in this environment (an Application Control policy
-  blocking `_expected_mutual_info_fast`, the same class of local-only
-  issue documented for mypy's DLL in ARCHITECTURE.md Section 18) and
-  could not be verified to work at all, let alone match anything.
+- mutual_information: no R reference at all. KSG (Kraskov-Stogbauer-
+  Grassberger 2004) k-NN estimator on `scipy.spatial.cKDTree`, with
+  sklearn's `mutual_info_regression` preprocessing (unit-variance scaling,
+  seeded tie-breaking jitter). Kept in-house (written when sklearn could
+  not be imported on the maintainer's Windows machine) and tested against
+  sklearn, which it matches to ~1e-12 on continuous data.
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
 from itertools import combinations, permutations
-from math import factorial
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -53,7 +50,7 @@ from statsmodels.stats.multitest import multipletests
 
 from edacore.contracts import TestResult
 from edacore.registry import register
-from edacore.stattests._shared import MAX_EXACT_PERMUTATIONS, NanPolicy
+from edacore.stattests._shared import NanPolicy
 
 
 def _clean_pair(
@@ -118,21 +115,83 @@ def pearson(
     )
 
 
-def _exact_permutation_p(a: np.ndarray, b: np.ndarray, corr_fn: Any) -> tuple[float, bool]:
-    """Two-sided exact p-value for a rank correlation via full permutation
-    enumeration, bounded by MAX_EXACT_PERMUTATIONS. Returns (p_value,
-    used_exact)."""
-    n = len(a)
-    if factorial(n) > MAX_EXACT_PERMUTATIONS:
-        return float("nan"), False
-    observed = abs(corr_fn(a, b))
-    n_extreme = 0
-    n_total = 0
-    for perm in permutations(range(n)):
-        n_total += 1
-        if abs(corr_fn(a, np.asarray(b)[list(perm)])) >= observed - 1e-10:
-            n_extreme += 1
-    return n_extreme / n_total, True
+# Largest n for which R's C_pRho enumerates the null distribution of S;
+# above it, the AS 89 Edgeworth series. R stays in C_pRho up to n=1290.
+_PRHO_N_EXACT = 9
+_PRHO_N_MAX = 1290
+# AS 89 Edgeworth-series coefficients (Best & Roberts 1975).
+_AS89_C = (
+    0.2274,
+    0.2531,
+    0.1745,
+    0.0758,
+    0.1033,
+    0.3932,
+    0.0879,
+    0.0151,
+    0.0072,
+    0.0831,
+    0.0131,
+    4.6e-4,
+)
+
+
+@lru_cache(maxsize=_PRHO_N_EXACT)
+def _spearman_s_null(n: int) -> np.ndarray:
+    """Sorted S = sum((i - p_i)^2) over all n! permutations p (the exact
+    null distribution of Spearman's S, no ties)."""
+    perms = np.array(list(permutations(range(n))), dtype=np.int64)
+    return np.sort(((perms - np.arange(n)) ** 2).sum(axis=1))
+
+
+def _prho(n: int, s: float, lower_tail: bool) -> float:
+    """AS 89: P[S >= s] (or P[S < s] if lower_tail) under H0, where
+    S = (n^3 - n)(1 - rho)/6. Exact for n <= 9, Edgeworth series above."""
+    tail_default = 0.0 if lower_tail else 1.0
+    if s <= 0:
+        return tail_default
+    s_max = n * (n * n - 1) / 3
+    if s > s_max:
+        return 1 - tail_default
+    if n <= _PRHO_N_EXACT:
+        null = _spearman_s_null(n)
+        n_ge = len(null) - int(np.searchsorted(null, s, side="left"))
+        return (len(null) - n_ge if lower_tail else n_ge) / len(null)
+
+    c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12 = _AS89_C
+    b = 1 / n
+    x = (6 * (s - 1) * b / (n * n - 1) - 1) * np.sqrt(n - 1)
+    y = x * x
+    u = (
+        x
+        * b
+        * (
+            c1
+            + b * (c2 + c3 * b)
+            + y
+            * (
+                -c4
+                + b * (c5 + c6 * b)
+                - y * b * (c7 + c8 * b - y * (c9 - c10 * b + y * b * (c11 - c12 * y)))
+            )
+        )
+    )
+    correction = u / np.exp(y / 2)
+    p = (-correction if lower_tail else correction) + float(
+        stats.norm.cdf(x) if lower_tail else stats.norm.sf(x)
+    )
+    return float(min(max(p, 0.0), 1.0))
+
+
+def _spearman_exact_p(rho: float, n: int) -> float:
+    """Two-sided p-value exactly as R's cor.test(method='spearman') computes
+    it without ties (n <= 1290)."""
+    q = (n**3 - n) * (1 - rho) / 6
+    if q > (n**3 - n) / 6:
+        p = _prho(n, round(q), lower_tail=False)
+    else:
+        p = _prho(n, round(q) + 2, lower_tail=True)
+    return min(2 * p, 1.0)
 
 
 @register(
@@ -154,34 +213,36 @@ def spearman(df: pd.DataFrame, x: str, y: str, nan_policy: NanPolicy = "omit") -
     has_ties = len(np.unique(xv)) < n or len(np.unique(yv)) < n
 
     result = stats.spearmanr(xv, yv)
+    rho = float(result.statistic)
     p_value = float(result.pvalue)
-    if not has_ties:
-
-        def _rho(a: np.ndarray, b: np.ndarray) -> float:
-            return float(np.corrcoef(stats.rankdata(a), stats.rankdata(b))[0, 1])
-
-        exact_p, used_exact = _exact_permutation_p(xv, yv, _rho)
-        if used_exact:
-            p_value = exact_p
-            warnings.append(f"exact permutation p-value (n={n}, no ties)")
-        else:
-            warnings.append(
-                f"n={n} too large for this module's exact permutation p-value "
-                f"(n! > {MAX_EXACT_PERMUTATIONS}); using the asymptotic approximation, "
-                "which may not match R's own exact algorithm (R stays exact up to n<1290)"
-            )
+    if has_ties:
+        warnings.append("ties present: t-approximation p-value (as R's cor.test)")
+    elif n <= _PRHO_N_EXACT:
+        p_value = _spearman_exact_p(rho, n)
+        warnings.append(f"exact p-value (full enumeration of the null distribution, n={n})")
+    elif n <= _PRHO_N_MAX:
+        p_value = _spearman_exact_p(rho, n)
+        warnings.append(f"AS 89 Edgeworth-series p-value (n={n}, no ties; as R's cor.test)")
+    else:
+        warnings.append(f"n={n} > {_PRHO_N_MAX}: t-approximation p-value (as R's cor.test)")
 
     return TestResult(
         fact_id=f"spearman.{x}.{y}",
         function="spearman",
         estimand=f"monotonic association between '{x}' and '{y}'",
-        statistic=float(result.statistic),
-        statistic_name="rho",
+        # R's S = (n^3 - n)(1 - rho)/6, the statistic its p-value is
+        # computed from; rho itself is the estimate.
+        statistic=float((n**3 - n) * (1 - rho) / 6),
+        statistic_name="S",
         p_value=p_value,
-        estimate=float(result.statistic),
+        estimate=rho,
         n={"total": n},
         warnings=warnings,
     )
+
+
+# R's cor.test(method='kendall') is exact for n below this (no ties).
+_KENDALL_N_EXACT = 50
 
 
 def _kendall_z_statistic(x: np.ndarray, y: np.ndarray, tau_b: float) -> float:
@@ -223,45 +284,35 @@ def _kendall_z_statistic(x: np.ndarray, y: np.ndarray, tau_b: float) -> float:
     ),
 )
 def kendall_tau(df: pd.DataFrame, x: str, y: str, nan_policy: NanPolicy = "omit") -> TestResult:
-    """tau-b (scipy's default `variant='b'`, matching R's default);
-    scipy's `method='auto'` already falls back to the normal
-    approximation exactly when R would (ties present), confirmed against
-    an R fixture with ties -- verified bit-for-bit, no porting needed
-    there. Exact mode (no ties, small n) uses the same permutation
-    enumeration as spearman, for the same reason (no scipy equivalent)."""
+    """tau-b (scipy's default `variant='b'`, matching R's default). As in
+    R's cor.test: exact null distribution of T (the concordant-pair count)
+    without ties and n<50, reporting T; otherwise the normal approximation
+    with R's tie-corrected variance, reporting z."""
     warnings: list[str] = []
     clean = _clean_pair(df, x, y, nan_policy, warnings)
     xv, yv = clean[x].to_numpy(), clean[y].to_numpy()
     n = len(xv)
     has_ties = len(np.unique(xv)) < n or len(np.unique(yv)) < n
+    exact = not has_ties and n < _KENDALL_N_EXACT
 
-    result = stats.kendalltau(xv, yv, variant="b", method="auto")
-    p_value = float(result.pvalue)
-    if not has_ties:
-
-        def _tau(a: np.ndarray, b: np.ndarray) -> float:
-            return float(stats.kendalltau(a, b, variant="b", method="asymptotic").statistic)
-
-        exact_p, used_exact = _exact_permutation_p(xv, yv, _tau)
-        if used_exact:
-            p_value = exact_p
-            warnings.append(f"exact permutation p-value (n={n}, no ties)")
-        else:
-            warnings.append(
-                f"n={n} too large for this module's exact permutation p-value "
-                f"(n! > {MAX_EXACT_PERMUTATIONS}); using the asymptotic approximation, "
-                "which may not match R's own exact algorithm (R stays exact up to n<50)"
-            )
-
+    result = stats.kendalltau(xv, yv, variant="b", method="exact" if exact else "asymptotic")
     tau_b = float(result.statistic)
-    z_stat = _kendall_z_statistic(xv, yv, tau_b)
+    p_value = float(result.pvalue)
+    if exact:
+        statistic, statistic_name = float(round((tau_b + 1) * n * (n - 1) / 4)), "T"
+        warnings.append(f"exact p-value (null distribution of T, n={n}, no ties)")
+    else:
+        statistic, statistic_name = _kendall_z_statistic(xv, yv, tau_b), "z"
+        p_value = float(2 * stats.norm.sf(abs(statistic)))
+        reason = "ties present" if has_ties else f"n={n} >= {_KENDALL_N_EXACT}"
+        warnings.append(f"{reason}: normal-approximation p-value (as R's cor.test)")
 
     return TestResult(
         fact_id=f"kendall_tau.{x}.{y}",
         function="kendall_tau",
         estimand=f"ordinal association between '{x}' and '{y}'",
-        statistic=z_stat,
-        statistic_name="z",
+        statistic=statistic,
+        statistic_name=statistic_name,
         p_value=p_value,
         estimate=tau_b,
         n={"total": n},
@@ -442,25 +493,29 @@ def distance_correlation(
     )
 
 
-def _ksg_mutual_information(x: np.ndarray, y: np.ndarray, k: int = 5) -> float:
+def _ksg_mutual_information(
+    x: np.ndarray, y: np.ndarray, k: int = 5, random_state: int = 0
+) -> float:
     """Kraskov-Stogbauer-Grassberger (2004) k-NN mutual information
-    estimator, built directly on scipy.spatial.cKDTree (see module
-    docstring for why not sklearn's mutual_info_regression)."""
+    estimator (algorithm 1, max-norm), with sklearn's
+    `mutual_info_regression` preprocessing: each variable scaled to unit
+    variance (the max-norm neighbourhoods are not scale-invariant, MI is),
+    plus 1e-10-relative jitter so tied values don't give zero radii."""
     n = len(x)
-    xy = np.column_stack([x, y])
-    tree_xy = cKDTree(xy)
-    dists, _ = tree_xy.query(xy, k=k + 1, p=np.inf)
-    eps = dists[:, -1]
+    rng = np.random.default_rng(random_state)
+    scaled = []
+    for v in (x, y):
+        v = v / v.std()
+        scaled.append(v + 1e-10 * max(1.0, float(np.mean(np.abs(v)))) * rng.standard_normal(n))
+    xs, ys = scaled
 
-    tree_x = cKDTree(x.reshape(-1, 1))
-    tree_y = cKDTree(y.reshape(-1, 1))
-    nx = np.array(
-        [len(tree_x.query_ball_point([x[i]], eps[i] - 1e-10, p=np.inf)) - 1 for i in range(n)]
-    )
-    ny = np.array(
-        [len(tree_y.query_ball_point([y[i]], eps[i] - 1e-10, p=np.inf)) - 1 for i in range(n)]
-    )
-    mi = digamma(k) - float(np.mean(digamma(nx + 1) + digamma(ny + 1))) + digamma(n)
+    xy = np.column_stack([xs, ys])
+    dists, _ = cKDTree(xy).query(xy, k=k + 1, p=np.inf)
+    # Strictly inside the k-th neighbour's distance (the point itself included).
+    radius = np.nextafter(dists[:, -1], 0)
+    nx = cKDTree(xs[:, None]).query_ball_point(xs[:, None], radius, p=np.inf, return_length=True)
+    ny = cKDTree(ys[:, None]).query_ball_point(ys[:, None], radius, p=np.inf, return_length=True)
+    mi = digamma(n) + digamma(k) - float(np.mean(digamma(nx) + digamma(ny)))
     return max(float(mi), 0.0)
 
 
@@ -473,16 +528,21 @@ def _ksg_mutual_information(x: np.ndarray, y: np.ndarray, k: int = 5) -> float:
     estimand="general statistical dependence between two continuous variables",
     code_template=(
         "edacore.stattests.correlation.mutual_information("
-        "{df}, x={x!r}, y={y!r}, k={k}, nan_policy={nan_policy!r})"
+        "{df}, x={x!r}, y={y!r}, k={k}, random_state={random_state}, nan_policy={nan_policy!r})"
     ),
 )
 def mutual_information(
-    df: pd.DataFrame, x: str, y: str, k: int = 5, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    k: int = 5,
+    random_state: int = 0,
+    nan_policy: NanPolicy = "omit",
 ) -> TestResult:
-    """No R reference exists for this estimator; verified instead against
-    the analytic bivariate-normal formula -0.5*ln(1-rho^2) by simulation
-    (test_correlation.py), with a tolerance justified by the KSG
-    estimator's known finite-sample bias/variance at the tested n and k.
+    """No R reference exists for this estimator; verified against
+    sklearn's `mutual_info_regression` (same algorithm and preprocessing)
+    and against the analytic bivariate-normal formula -0.5*ln(1-rho^2)
+    (test_correlation.py). `random_state` seeds the tie-breaking jitter.
     No p-value: mutual information has no standard null-hypothesis test
     the way a correlation coefficient does."""
     warnings: list[str] = []
@@ -490,8 +550,17 @@ def mutual_information(
     n = len(clean)
     if k >= n:
         raise ValueError(f"k ({k}) must be less than n ({n})")
+    xv, yv = clean[x].to_numpy(dtype=float), clean[y].to_numpy(dtype=float)
+    for name, v in ((x, xv), (y, yv)):
+        if np.ptp(v) == 0:
+            raise ValueError(f"'{name}' is constant; mutual information is undefined")
+    if len(np.unique(xv)) < n or len(np.unique(yv)) < n:
+        warnings.append(
+            "tied values broken by 1e-10 jitter: the KSG estimator assumes continuous "
+            "variables, so treat the estimate as approximate for discrete/ordinal data"
+        )
 
-    mi = _ksg_mutual_information(clean[x].to_numpy(dtype=float), clean[y].to_numpy(dtype=float), k)
+    mi = _ksg_mutual_information(xv, yv, k, random_state)
 
     return TestResult(
         fact_id=f"mutual_information.{x}.{y}",

@@ -9,13 +9,15 @@
   ratio -- this is the conditional MLE R's `fisher.test` reports, a
   genuinely different number from the naive sample odds ratio (ad/bc) and
   from `fisher_exact`'s own returned statistic (the unconditional MLE).
-  For r x c tables (3+ rows/cols), scipy's own exact p-value does NOT
-  match R's `fisher.test` (confirmed: both are genuinely exact, just
-  different conventions for "at least as extreme" in a table with no
-  natural ordering) -- used as-is per the maintainer's explicit choice;
-  documented here rather than silently reconciled. r x c needs
-  scipy>=1.15; at the declared floor (1.13) scipy's fisher_exact is 2x2
-  only, so r x c raises a clear error there rather than failing obscurely.
+  For r x c tables (3+ rows/cols), scipy's `fisher_exact` is NOT exact:
+  its default is an unseeded `MonteCarloMethod` (9999 draws), so its
+  p-value changed from call to call. `_fisher_rxc_exact_p` instead
+  enumerates every table with the observed margins and sums the
+  probabilities of those with log P <= log P(observed) + 3.45254e-7 --
+  R's FEXACT tolerance (`tol` in fexact.c, added to the observed path
+  length in log space), i.e. R's `fisher.test` convention. Matches R to
+  ~1e-12. Above MAX_FISHER_TABLES tables it falls back to a seeded Monte
+  Carlo p-value, disclosed in `warnings`.
 - g_test: ported DescTools::GTest's exact formula (read from its source),
   matched at its default `correct="none"` (not Williams-corrected).
 - two_proportion_z: R's `prop.test` for two samples is, despite its name,
@@ -37,9 +39,12 @@
 
 from __future__ import annotations
 
+from itertools import combinations
+
 import numpy as np
 import pandas as pd
 from scipy import stats
+from scipy.special import gammaln
 from scipy.stats.contingency import odds_ratio as _scipy_odds_ratio
 
 from edacore.contracts import TestResult
@@ -101,6 +106,59 @@ def chi2_independence(
     )
 
 
+# Above this many tables with the observed margins, r x c Fisher falls back
+# from full enumeration to a seeded Monte Carlo p-value.
+MAX_FISHER_TABLES = 2_000_000
+# R's FEXACT tolerance on the observed table's log-probability (fexact.c).
+_FEXACT_TOL = 3.45254e-7
+# Bounds the (states x column-vectors x rows) boolean array per chunk.
+_FISHER_CHUNK_CELLS = 20_000_000
+
+
+def _compositions(total: int, parts: int) -> np.ndarray:
+    """All non-negative integer vectors of length `parts` summing to `total`."""
+    bars = np.array(list(combinations(range(total + parts - 1), parts - 1)), dtype=np.int64)
+    bars = bars.reshape(-1, parts - 1)
+    edges = np.concatenate(
+        [np.full((len(bars), 1), -1), bars, np.full((len(bars), 1), total + parts - 1)], axis=1
+    )
+    return np.diff(edges, axis=1) - 1
+
+
+def _fisher_rxc_exact_p(table: np.ndarray) -> float | None:
+    """Exact r x c Fisher p-value with R's fisher.test convention, or None
+    if more than MAX_FISHER_TABLES tables share the observed margins.
+
+    Builds every table column by column (the last column is then fixed by
+    the row margins), tracking each partial table's log-probability under
+    the multivariate hypergeometric null."""
+    t = table if table.shape[0] <= table.shape[1] else table.T
+    rows, cols = t.sum(axis=1), t.sum(axis=0)
+    log_const = float(gammaln(rows + 1).sum() + gammaln(cols + 1).sum() - gammaln(t.sum() + 1))
+    log_p_obs = log_const - float(gammaln(t + 1).sum())
+
+    remaining = rows[None, :].astype(np.int64)
+    log_p = np.array([log_const])
+    for col_total in cols[:-1]:
+        cand = _compositions(int(col_total), len(rows))
+        cand_log = gammaln(cand + 1).sum(axis=1)
+        chunk = max(1, _FISHER_CHUNK_CELLS // (len(cand) * len(rows)))
+        new_remaining, new_log_p, n_states = [], [], 0
+        for start in range(0, len(remaining), chunk):
+            rem = remaining[start : start + chunk]
+            si, ki = np.nonzero((cand[None, :, :] <= rem[:, None, :]).all(axis=2))
+            n_states += len(si)
+            if n_states > MAX_FISHER_TABLES:
+                return None
+            new_remaining.append(rem[si] - cand[ki])
+            new_log_p.append(log_p[start + si] - cand_log[ki])
+        remaining, log_p = np.concatenate(new_remaining), np.concatenate(new_log_p)
+
+    log_p = log_p - gammaln(remaining + 1).sum(axis=1)
+    p = float(np.exp(log_p[log_p <= log_p_obs + _FEXACT_TOL]).sum())
+    return min(max(p, 0.0), 1.0)
+
+
 @register(
     name="fisher_exact",
     kind="test",
@@ -110,50 +168,58 @@ def chi2_independence(
     estimand="association between two categorical variables",
     code_template=(
         "edacore.stattests.categorical.fisher_exact("
-        "{df}, a={a!r}, b={b!r}, nan_policy={nan_policy!r})"
+        "{df}, a={a!r}, b={b!r}, random_state={random_state}, nan_policy={nan_policy!r})"
     ),
 )
-def fisher_exact(df: pd.DataFrame, a: str, b: str, nan_policy: NanPolicy = "omit") -> TestResult:
+def fisher_exact(
+    df: pd.DataFrame, a: str, b: str, random_state: int = 0, nan_policy: NanPolicy = "omit"
+) -> TestResult:
     """For a 2x2 table: reports the conditional MLE odds ratio (matching
-    R's fisher.test) with its exact CI. For r x c: p-value only, using
-    scipy's own exact convention -- documented not to bit-match R's
-    fisher.test for tables larger than 2x2 (module docstring)."""
+    R's fisher.test) with its exact CI. For r x c: exact p-value by full
+    enumeration, R's fisher.test convention (module docstring);
+    `random_state` only matters above MAX_FISHER_TABLES, where a seeded
+    Monte Carlo p-value is used instead."""
     warnings: list[str] = []
     clean = _clean_pair(df, a, b, nan_policy, warnings)
     table = pd.crosstab(clean[a], clean[b])
     arr = table.to_numpy()
 
-    try:
-        result = stats.fisher_exact(arr)
-    except ValueError as exc:
-        if arr.shape != (2, 2):
-            raise ValueError(
-                f"fisher_exact on a {arr.shape[0]}x{arr.shape[1]} table needs scipy>=1.15 "
-                "(older scipy, including this project's declared floor of 1.13, supports 2x2 only)"
-            ) from exc
-        raise
     estimate: float | None = None
     ci: tuple[float, float] | None = None
     effect_size_name: str | None = None
     if arr.shape == (2, 2):
+        p_value = float(stats.fisher_exact(arr).pvalue)
         or_result = _scipy_odds_ratio(arr, kind="conditional")
         estimate = float(or_result.statistic)
         effect_size_name = "odds_ratio_conditional_mle"
         low, high = or_result.confidence_interval(0.95)
         ci = (float(low), float(high))
+    elif min(arr.shape) < 2:
+        p_value = 1.0  # only one table has these margins
     else:
-        warnings.append(
-            "r x c table: p-value uses scipy's own exact convention, which does not "
-            "bit-match R's fisher.test for tables larger than 2x2 (see module docstring)"
-        )
+        exact_p = _fisher_rxc_exact_p(arr)
+        if exact_p is not None:
+            p_value = exact_p
+            warnings.append(
+                f"{arr.shape[0]}x{arr.shape[1]} table: exact p-value by full enumeration "
+                "(R's fisher.test convention); no odds ratio for tables larger than 2x2"
+            )
+        else:
+            mc = stats.MonteCarloMethod(n_resamples=9999, rng=np.random.default_rng(random_state))
+            p_value = float(stats.fisher_exact(arr, method=mc).pvalue)
+            warnings.append(
+                f"{arr.shape[0]}x{arr.shape[1]} table: more than {MAX_FISHER_TABLES:,} tables "
+                "share these margins, so the p-value is Monte Carlo (9999 draws, "
+                f"random_state={random_state}), not exact"
+            )
 
     return TestResult(
         fact_id=f"fisher_exact.{a}.{b}",
         function="fisher_exact",
         estimand=f"association between '{a}' and '{b}'",
-        statistic=float(result.pvalue),
+        statistic=p_value,
         statistic_name="p_value",
-        p_value=float(result.pvalue),
+        p_value=p_value,
         estimate=estimate,
         ci=ci,
         effect_size=estimate,
