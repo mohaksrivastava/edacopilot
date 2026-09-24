@@ -81,6 +81,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
   "llm: requires a live or mocked LLM call (excluded from the default CI run)",
+  "slow: runs a coverage simulation (hundreds of trials); still runs in CI, pass -m 'not slow' to skip locally",
 ]
 filterwarnings = [
   # edacore.contracts.TestResult is a pydantic model (Section 5.3), not a

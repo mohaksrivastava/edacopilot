@@ -1,12 +1,14 @@
 """edacore.effect_sizes vs R's effectsize package
 (tests/fixtures/r_reference/). Every point estimate is checked to 1e-6.
 
-CIs for cohens_d, hedges_g, glass_delta, d_z, cohens_h, odds_ratio,
-risk_ratio, risk_difference are checked too (verified exact methods). CIs
-for the bootstrap-CI functions (rank_biserial, cliffs_delta, eta_squared,
-partial_eta_squared, omega_squared, epsilon_squared, kendalls_w, cramers_v,
-phi, cohens_w) are NOT compared to R — see the module docstring in
-effect_sizes.py and ARCHITECTURE.md Section 18's M2 changelog entry.
+As of M2.1, CIs are checked for every function EXCEPT kendalls_w and
+epsilon_squared: those two genuinely bootstrap in R (plain percentile, not
+BCa), so a specific interval can't be fixture-matched — their CIs are
+validated by simulated coverage instead, in
+test_effect_size_ci_coverage.py (marked slow). cohens_w's CI formula is
+implemented and internally consistent (see module docstring) but not yet
+checked against a fixture: the M2 fixture generation never captured its
+CI. See ARCHITECTURE.md Section 18's M2.1 changelog entry.
 """
 
 from __future__ import annotations
@@ -93,11 +95,13 @@ def test_glass_delta_matches_r() -> None:
     )
 
 
-def test_rank_biserial_matches_r_point_estimate() -> None:
+def test_rank_biserial_matches_r() -> None:
     df = _data("two_groups_equal_var")
     ref = _ref("rank_biserial__two_groups_equal_var")
     result = edacore.effect_sizes.rank_biserial(df, "value", "group", ("A", "B"))
     _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"])
+    _assert_close(result["ci_high"], ref["ci_high"])
     assert_codegen_matches(
         registry,
         "rank_biserial",
@@ -107,11 +111,13 @@ def test_rank_biserial_matches_r_point_estimate() -> None:
     )
 
 
-def test_cliffs_delta_matches_r_point_estimate() -> None:
+def test_cliffs_delta_matches_r() -> None:
     df = _data("two_groups_equal_var")
     ref = _ref("cliffs_delta__two_groups_equal_var")
     result = edacore.effect_sizes.cliffs_delta(df, "value", "group", ("A", "B"))
     _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"])
+    _assert_close(result["ci_high"], ref["ci_high"])
     assert_codegen_matches(
         registry,
         "cliffs_delta",
@@ -143,11 +149,13 @@ def test_d_z_matches_r() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_eta_squared_matches_r_point_estimate() -> None:
+def test_eta_squared_matches_r() -> None:
     df = _data("three_groups")
     ref = _ref("eta_squared__three_groups")
     result = edacore.effect_sizes.eta_squared(df, "value", "group")
     _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"], abs_tol=1e-5)
+    _assert_close(result["ci_high"], ref["ci_high"])
     assert_codegen_matches(
         registry,
         "eta_squared",
@@ -162,6 +170,8 @@ def test_partial_eta_squared_equals_eta_squared_for_one_way() -> None:
     ref = _ref("partial_eta_squared__three_groups")
     result = edacore.effect_sizes.partial_eta_squared(df, "value", "group")
     _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"], abs_tol=1e-5)
+    _assert_close(result["ci_high"], ref["ci_high"])
     assert_codegen_matches(
         registry,
         "partial_eta_squared",
@@ -171,11 +181,13 @@ def test_partial_eta_squared_equals_eta_squared_for_one_way() -> None:
     )
 
 
-def test_omega_squared_matches_r_point_estimate() -> None:
+def test_omega_squared_matches_r() -> None:
     df = _data("three_groups")
     ref = _ref("omega_squared__three_groups")
     result = edacore.effect_sizes.omega_squared(df, "value", "group")
     _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"], abs_tol=1e-5)
+    _assert_close(result["ci_high"], ref["ci_high"])
     assert_codegen_matches(
         registry,
         "omega_squared",
@@ -218,12 +230,14 @@ def test_kendalls_w_matches_r_point_estimate() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_cramers_v_matches_r_point_estimate() -> None:
+def test_cramers_v_matches_r() -> None:
     df = _data("contingency_3x3")
     long = df.loc[df.index.repeat(df.Freq)].reset_index(drop=True)
     ref = _ref("cramers_v__contingency_3x3")
     result = edacore.effect_sizes.cramers_v(long, "row", "col")
     _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"], abs_tol=1e-5)
+    _assert_close(result["ci_high"], ref["ci_high"])
     assert_codegen_matches(
         registry,
         "cramers_v",
@@ -233,12 +247,14 @@ def test_cramers_v_matches_r_point_estimate() -> None:
     )
 
 
-def test_phi_matches_r_point_estimate() -> None:
+def test_phi_matches_r() -> None:
     df = _data("contingency_2x2")
     long = df.loc[df.index.repeat(df.Freq)].reset_index(drop=True)
     ref = _ref("phi__contingency_2x2")
     result = edacore.effect_sizes.phi(long, "exposure", "outcome")
     _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"], abs_tol=1e-5)
+    _assert_close(result["ci_high"], ref["ci_high"])
     assert_codegen_matches(
         registry, "phi", {"a": "exposure", "b": "outcome", "ci": 0.95}, long, namespace=_NAMESPACE
     )

@@ -278,13 +278,16 @@ def test_check_measurement_level_fails_for_wrong_scale() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_check_sphericity_mauchly_statistic_matches_r() -> None:
+def test_check_sphericity_mauchly_matches_r_exactly() -> None:
+    """This is an exact port of R's mauchly.test.SSD (statistic and
+    p-value, including its two-term Box correction), not an approximation."""
     # repeated_measures_wide.csv columns are subject,t1,t2,t3,t4 - reshape to long first
     wide = _data("repeated_measures_wide")
     long = wide.melt(id_vars="subject", var_name="within", value_name="dv")
     ref = _ref("check_sphericity_mauchly__repeated_measures")
     check = edacore.assumptions.check_sphericity_mauchly(long, "subject", "within", "dv")
     _close(check.statistic, ref["statistic"], abs_tol=1e-8)
+    _close(check.p_value, ref["p_value"], abs_tol=1e-10)
     assert_codegen_matches(
         registry,
         "check_sphericity_mauchly",

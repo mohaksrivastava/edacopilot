@@ -1,19 +1,27 @@
 """Effect sizes (ARCHITECTURE.md, Section 6.8).
 
-Every point estimate here is verified to match R's `effectsize` package
-(tests/fixtures/r_reference/) to at least 1e-6. Confidence intervals for
-cohens_d, hedges_g, glass_delta, d_z, cohens_h, odds_ratio, risk_ratio, and
-risk_difference use the exact method `effectsize`/`stats::prop.test` use
-(noncentral-t inversion for the mean-difference family, log-scale Wald for
-the ratio family, arcsine for cohens_h) and are verified the same way.
+Every point estimate here matches R's `effectsize` package
+(tests/fixtures/r_reference/) to at least 1e-6. As of M2.1, every CI is
+ported from effectsize's actual algorithm (read from its R source, not
+guessed) rather than approximated — see each function's docstring for its
+method and ARCHITECTURE.md Section 18's M2.1 changelog entry for the full
+account of what was verified and what changed from M2's initial (partly
+mistaken) assumptions about which functions bootstrap:
 
-rank_biserial, cliffs_delta, eta_squared, partial_eta_squared,
-omega_squared, epsilon_squared, kendalls_w, cramers_v, phi, and cohens_w
-use `bootstrap_effect_ci` (percentile bootstrap) instead: `effectsize`
-computes their CIs with noncentral-F / specialized asymptotic methods this
-module doesn't reproduce, so treat the point estimate as R-verified and the
-CI as approximate, not bit-for-bit matched. See ARCHITECTURE.md Section 18
-Changelog, M2 entry.
+- cohens_d, hedges_g, glass_delta, d_z: noncentral-t inversion.
+- odds_ratio, risk_ratio, risk_difference: log-scale / linear Wald.
+- cohens_h: arcsine.
+- eta_squared, partial_eta_squared, omega_squared: noncentral-F inversion,
+  one-sided (ci_high fixed at 1).
+- cramers_v, phi, cohens_w: noncentral chi-square inversion, one-sided.
+- rank_biserial, cliffs_delta: exact closed form (Fisher-z transform with
+  an analytic SE) — effectsize does NOT bootstrap these, despite M2
+  assuming it did.
+- kendalls_w, epsilon_squared: BCa bootstrap. effectsize itself uses plain
+  percentile bootstrap for both (not BCa) — this module uses BCa instead
+  for a tighter interval, validated by simulated coverage rather than
+  fixture matching (test_effect_size_ci_coverage.py), since a bootstrap's
+  specific resampling draws can't be matched to R's bit-for-bit anyway.
 """
 
 from __future__ import annotations
@@ -72,6 +80,52 @@ def _ncp_ci(t_obs: float, df: float, hn: float, ci: float) -> tuple[float, float
     return ncp_low * np.sqrt(hn), ncp_high * np.sqrt(hn)
 
 
+def _invert_nc_cdf_nonneg(cdf_fn: Any, target_p: float, hi_guess: float = 500.0) -> float:
+    """Find nc >= 0 such that cdf_fn(nc) == target_p, for a noncentral F or
+    chi-square CDF (monotonically decreasing in nc, domain [0, inf)).
+
+    Mirrors effectsize's `.get_ncp_F` / `.get_ncp_chi` edge case: if even
+    nc=0 (the largest possible CDF value) is at or below target_p, no
+    nonnegative nc can reach it, so the bound is 0 (matches R setting that
+    ncp to 0 when the observed statistic is below the target quantile).
+    """
+    if cdf_fn(0.0) <= target_p:
+        return 0.0
+    grid = np.linspace(0, hi_guess, 4001)
+    with np.errstate(all="ignore"):
+        vals = np.array([cdf_fn(x) for x in grid]) - target_p
+    valid = ~np.isnan(vals)
+    grid, vals = grid[valid], vals[valid]
+    sign_changes = np.where(np.diff(np.sign(vals)) != 0)[0]
+    if len(sign_changes) == 0:
+        raise ValueError(f"no sign change found for target_p={target_p} in [0, {hi_guess}]")
+    i = sign_changes[0]
+    return float(optimize.brentq(lambda nc: cdf_fn(nc) - target_p, grid[i], grid[i + 1]))
+
+
+def _pve_ci_low(estimate: float, df1: float, df2: float, ci: float) -> float:
+    """One-sided lower confidence bound for a proportion-of-variance
+    effect size (eta-squared, omega-squared), via noncentral-F inversion.
+
+    Matches effectsize's `.get_ncp_F` + eta2 back-conversion exactly
+    (verified to ~1e-9 against R): reconstruct a pseudo-F from the point
+    estimate, find the ncp for which that pseudo-F sits at the `ci`
+    quantile of noncentral F(df1, df2, ncp), then convert that ncp back
+    to the eta2 scale via ncp / (ncp + df2).
+    """
+    if estimate <= 0:
+        return 0.0
+    pseudo_f = (estimate / df1) / ((1 - estimate) / df2)
+    ncp_low = _invert_nc_cdf_nonneg(lambda nc: float(stats.ncf.cdf(pseudo_f, df1, df2, nc)), ci)
+    return ncp_low / (ncp_low + df2)
+
+
+def _ncx2_ci_low(chi2_stat: float, df: float, ci: float) -> float:
+    """ncp lower bound via noncentral chi-square inversion, matching
+    effectsize's `.get_ncp_chi` (verified to ~1e-8 against R)."""
+    return _invert_nc_cdf_nonneg(lambda nc: float(stats.ncx2.cdf(chi2_stat, df, nc)), ci)
+
+
 def _log_scale_ci(estimate: float, se_log: float, ci: float) -> tuple[float, float]:
     """Wald CI on the log scale, for ratio measures (odds ratio, risk ratio)."""
     z = stats.norm.ppf(1 - (1 - ci) / 2)
@@ -119,39 +173,6 @@ def bootstrap_effect_ci(
     return float(lo), float(hi)
 
 
-def _cluster_bootstrap_ci(
-    fn: Any,
-    df: pd.DataFrame,
-    cluster: str,
-    *,
-    n_boot: int = 2000,
-    ci: float = 0.95,
-    random_state: int = 0,
-    **kwargs: Any,
-) -> tuple[float, float]:
-    """Like `bootstrap_effect_ci`, but resamples whole `cluster` groups
-    (e.g. subjects) rather than individual rows — required for
-    repeated-measures data, where resampling rows independently breaks the
-    within-subject structure a function like kendalls_w depends on."""
-    rng = np.random.default_rng(random_state)
-    cluster_ids = df[cluster].unique()
-    n = len(cluster_ids)
-    estimates = np.empty(n_boot)
-    for i in range(n_boot):
-        chosen = rng.choice(cluster_ids, size=n, replace=True)
-        # Relabel resampled clusters uniquely: the same subject drawn twice
-        # must not collapse into one row group under a pivot/groupby.
-        parts = [
-            df.loc[df[cluster] == cid].assign(**{cluster: f"{cid}__{draw}"})
-            for draw, cid in enumerate(chosen)
-        ]
-        resampled = pd.concat(parts, ignore_index=True)
-        estimates[i] = fn(resampled, **kwargs)
-    alpha = 1 - ci
-    lo, hi = np.nanpercentile(estimates, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return float(lo), float(hi)
-
-
 _MAGNITUDE_THRESHOLDS: dict[str, tuple[float, float, float]] = {
     # measure -> (small, medium, large), compared against abs(value)
     "cohens_d": (0.2, 0.5, 0.8),
@@ -170,6 +191,83 @@ _MAGNITUDE_THRESHOLDS: dict[str, tuple[float, float, float]] = {
     "phi": (0.1, 0.3, 0.5),
     "cohens_w": (0.1, 0.3, 0.5),
 }
+
+
+def _bca_from_bootstrap(
+    estimates: np.ndarray, observed: float, jackknife_estimates: np.ndarray, ci: float
+) -> tuple[float, float]:
+    """BCa (bias-corrected and accelerated) percentile adjustment, given a
+    bootstrap distribution, the whole-sample estimate, and leave-one-unit-out
+    jackknife estimates for the acceleration term (Efron & Tibshirani 1993).
+    """
+    alpha = 1 - ci
+    valid = ~np.isnan(estimates)
+    estimates = estimates[valid]
+    prop_less = (np.sum(estimates < observed) + 0.5 * np.sum(estimates == observed)) / len(
+        estimates
+    )
+    prop_less = min(max(prop_less, 1e-6), 1 - 1e-6)
+    z0 = stats.norm.ppf(prop_less)
+
+    theta_dot = jackknife_estimates.mean()
+    diffs = theta_dot - jackknife_estimates
+    denom = 6 * (np.sum(diffs**2)) ** 1.5
+    a = float(np.sum(diffs**3) / denom) if denom != 0 else 0.0
+
+    def _adjusted_percentile(z: float) -> float:
+        return float(stats.norm.cdf(z0 + (z0 + z) / (1 - a * (z0 + z))))
+
+    z_lo, z_hi = stats.norm.ppf(alpha / 2), stats.norm.ppf(1 - alpha / 2)
+    p_lo, p_hi = _adjusted_percentile(z_lo), _adjusted_percentile(z_hi)
+    lo, hi = np.nanpercentile(estimates, [100 * p_lo, 100 * p_hi])
+    return float(lo), float(hi)
+
+
+def _bca_matrix_row_bootstrap_ci(
+    fn: Any, mat: np.ndarray, *, n_boot: int = 2000, ci: float = 0.95, random_state: int = 0
+) -> tuple[float, float]:
+    """BCa CI resampling whole rows of a numpy matrix (e.g. subjects in a
+    subject x condition matrix, for kendalls_w) — required for
+    repeated-measures data, where resampling rows independently would
+    break the within-subject structure.
+
+    Pure numpy, not pandas: rebuilding a DataFrame (concat + relabel) on
+    every one of thousands of bootstrap iterations is 2-3 orders of
+    magnitude slower than indexing an array, and this is on the hot path
+    for every call.
+    """
+    rng = np.random.default_rng(random_state)
+    n = mat.shape[0]
+    estimates = np.array([fn(mat[rng.integers(0, n, size=n)]) for _ in range(n_boot)])
+    observed = fn(mat)
+    jackknife = np.array([fn(np.delete(mat, i, axis=0)) for i in range(n)])
+    return _bca_from_bootstrap(estimates, observed, jackknife, ci)
+
+
+def _bca_grouped_bootstrap_ci(
+    fn: Any,
+    arrays: list[np.ndarray],
+    *,
+    n_boot: int = 2000,
+    ci: float = 0.95,
+    random_state: int = 0,
+) -> tuple[float, float]:
+    """BCa CI resampling within each group's array separately (preserving
+    group sizes) — matches how R's own bootstrap for this family of
+    statistics resamples (for epsilon_squared). Pure numpy; see
+    `_bca_matrix_row_bootstrap_ci` for why."""
+    rng = np.random.default_rng(random_state)
+    estimates = np.array(
+        [fn([rng.choice(a, size=len(a), replace=True) for a in arrays]) for _ in range(n_boot)]
+    )
+    observed = fn(arrays)
+    jackknife = []
+    for gi, a in enumerate(arrays):
+        for i in range(len(a)):
+            reduced = list(arrays)
+            reduced[gi] = np.delete(a, i)
+            jackknife.append(fn(reduced))
+    return _bca_from_bootstrap(estimates, observed, np.array(jackknife), ci)
 
 
 def magnitude_label(
@@ -304,7 +402,13 @@ def rank_biserial(
     df: pd.DataFrame, outcome: str, group: str, groups: tuple[str, str], ci: float = 0.95
 ) -> dict[str, float]:
     """Rank-biserial correlation: 2U/(n1*n2) - 1, from the Mann-Whitney U
-    statistic for group[0] vs group[1]. CI is bootstrap (see module note)."""
+    statistic for group[0] vs group[1].
+
+    The CI is an exact closed form, not a bootstrap: effectsize's own
+    `rank_biserial` Fisher-z-transforms the correlation and uses an
+    analytic standard error (verified to ~1e-13 against R) — ported
+    directly rather than approximated.
+    """
     g1, g2 = groups
     x = df.loc[df[group] == g1, outcome].dropna().to_numpy(dtype=float)
     y = df.loc[df[group] == g2, outcome].dropna().to_numpy(dtype=float)
@@ -312,15 +416,11 @@ def rank_biserial(
     u_stat, _ = stats.mannwhitneyu(x, y, alternative="two-sided")
     estimate = 2 * u_stat / (n1 * n2) - 1
 
-    def _stat(sample_df: pd.DataFrame) -> float:
-        sx = sample_df.loc[sample_df[group] == g1, outcome].dropna().to_numpy(dtype=float)
-        sy = sample_df.loc[sample_df[group] == g2, outcome].dropna().to_numpy(dtype=float)
-        if len(sx) == 0 or len(sy) == 0:
-            return float("nan")
-        u, _ = stats.mannwhitneyu(sx, sy, alternative="two-sided")
-        return float(2 * u / (len(sx) * len(sy)) - 1)
-
-    ci_low, ci_high = bootstrap_effect_ci(_stat, df, ci=ci)
+    rank_z = np.arctanh(estimate)
+    se = np.sqrt((n1 + n2 + 1) / (3 * n1 * n2))
+    z = stats.norm.ppf(1 - (1 - ci) / 2)
+    ci_low = float(np.tanh(rank_z - z * se))
+    ci_high = float(np.tanh(rank_z + z * se))
     return {"estimate": float(estimate), "ci_low": ci_low, "ci_high": ci_high}
 
 
@@ -395,19 +495,15 @@ def _anova_sums_of_squares(df: pd.DataFrame, outcome: str, group: str) -> dict[s
 def eta_squared(df: pd.DataFrame, outcome: str, group: str, ci: float = 0.95) -> dict[str, float]:
     """SS_between / SS_total for a one-way design.
 
-    CI is bootstrap (see module note); effectsize uses a noncentral-F CI.
+    CI is one-sided (matching effectsize's `alternative="greater"`
+    default): ci_low via noncentral-F inversion, ci_high fixed at 1.
+    Verified to ~1e-9 against R.
     """
     ss = _anova_sums_of_squares(df, outcome, group)
-    estimate = ss["ss_between"] / ss["ss_total"]
-
-    def _stat(sample_df: pd.DataFrame) -> float:
-        s = _anova_sums_of_squares(sample_df, outcome, group)
-        if s["ss_total"] == 0:
-            return float("nan")
-        return float(s["ss_between"] / s["ss_total"])
-
-    ci_low, ci_high = bootstrap_effect_ci(_stat, df, ci=ci)
-    return {"estimate": float(estimate), "ci_low": ci_low, "ci_high": ci_high}
+    estimate = float(ss["ss_between"] / ss["ss_total"])
+    df1, df2 = ss["k"] - 1, ss["n"] - ss["k"]
+    ci_low = _pve_ci_low(estimate, df1, df2, ci)
+    return {"estimate": estimate, "ci_low": ci_low, "ci_high": 1.0}
 
 
 @register(
@@ -443,23 +539,19 @@ def partial_eta_squared(
 )
 def omega_squared(df: pd.DataFrame, outcome: str, group: str, ci: float = 0.95) -> dict[str, float]:
     """Less-biased alternative to eta_squared:
-    (SS_between - (k-1)*MS_within) / (SS_total + MS_within)."""
+    (SS_between - (k-1)*MS_within) / (SS_total + MS_within).
+
+    CI is one-sided, via the same noncentral-F inversion as eta_squared
+    but reconstructing a pseudo-F from the omega2 estimate first (matching
+    effectsize's actual algorithm — verified to ~1e-9 against R, not an
+    approximation). ci_high is fixed at 1.
+    """
     ss = _anova_sums_of_squares(df, outcome, group)
     ms_within = ss["ss_within"] / (ss["n"] - ss["k"])
-    estimate = (ss["ss_between"] - (ss["k"] - 1) * ms_within) / (ss["ss_total"] + ms_within)
-
-    def _stat(sample_df: pd.DataFrame) -> float:
-        s = _anova_sums_of_squares(sample_df, outcome, group)
-        if s["n"] <= s["k"]:
-            return float("nan")
-        msw = s["ss_within"] / (s["n"] - s["k"])
-        denom = s["ss_total"] + msw
-        if denom == 0:
-            return float("nan")
-        return float((s["ss_between"] - (s["k"] - 1) * msw) / denom)
-
-    ci_low, ci_high = bootstrap_effect_ci(_stat, df, ci=ci)
-    return {"estimate": float(estimate), "ci_low": ci_low, "ci_high": ci_high}
+    estimate = float((ss["ss_between"] - (ss["k"] - 1) * ms_within) / (ss["ss_total"] + ms_within))
+    df1, df2 = ss["k"] - 1, ss["n"] - ss["k"]
+    ci_low = _pve_ci_low(estimate, df1, df2, ci)
+    return {"estimate": estimate, "ci_low": ci_low, "ci_high": 1.0}
 
 
 @register(
@@ -474,21 +566,30 @@ def epsilon_squared(
     df: pd.DataFrame, outcome: str, group: str, ci: float = 0.95
 ) -> dict[str, float]:
     """Rank epsilon-squared, the nonparametric (Kruskal-Wallis-based)
-    analogue of eta_squared: H / (N - 1)."""
-    groups = [g[outcome].to_numpy(dtype=float) for _, g in df.groupby(group, observed=True)]
-    h_stat, _ = stats.kruskal(*groups)
-    n = len(df)
-    estimate = h_stat / (n - 1)
+    analogue of eta_squared: H / (N - 1).
 
-    def _stat(sample_df: pd.DataFrame) -> float:
-        gs = [g[outcome].to_numpy(dtype=float) for _, g in sample_df.groupby(group, observed=True)]
-        if len(gs) < 2 or any(len(g) == 0 for g in gs):
+    Despite Section 6.8 grouping this with eta2/omega2, effectsize's own
+    `rank_epsilon_squared` does NOT use a noncentral-F CI for it — its
+    source (`.boot_two_group_es`) shows a plain percentile bootstrap that
+    resamples WITHIN each group (preserving group sizes), R=200 by
+    default. This uses a BCa bootstrap with that same within-group
+    (stratified) resampling scheme instead of plain percentile, for a
+    tighter interval; see test_effect_size_ci_coverage.py for the
+    simulation-based validation this warrants in place of exact fixture
+    matching.
+    """
+
+    def _eps2(arrays: list[np.ndarray]) -> float:
+        if len(arrays) < 2 or any(len(a) == 0 for a in arrays):
             return float("nan")
-        h, _ = stats.kruskal(*gs)
-        return float(h / (len(sample_df) - 1))
+        h, _ = stats.kruskal(*arrays)
+        n_total = sum(len(a) for a in arrays)
+        return float(h / (n_total - 1))
 
-    ci_low, ci_high = bootstrap_effect_ci(_stat, df, ci=ci)
-    return {"estimate": float(estimate), "ci_low": ci_low, "ci_high": ci_high}
+    groups = [g[outcome].to_numpy(dtype=float) for _, g in df.groupby(group, observed=True)]
+    estimate = _eps2(groups)
+    ci_low, ci_high = _bca_grouped_bootstrap_ci(_eps2, groups, ci=ci)
+    return {"estimate": estimate, "ci_low": ci_low, "ci_high": ci_high}
 
 
 @register(
@@ -503,25 +604,32 @@ def epsilon_squared(
 def kendalls_w(
     df: pd.DataFrame, value: str, condition: str, subject: str, ci: float = 0.95
 ) -> dict[str, float]:
-    """Kendall's W for repeated measures: Friedman chi-square / (N*(k-1))."""
-    wide = df.pivot(index=subject, columns=condition, values=value)
-    n, k = wide.shape
-    fr_stat, _ = stats.friedmanchisquare(*[wide[c].to_numpy(dtype=float) for c in wide.columns])
-    estimate = fr_stat / (n * (k - 1))
+    """Kendall's W for repeated measures: Friedman chi-square / (N*(k-1)).
 
-    def _stat(sample_df: pd.DataFrame) -> float:
-        w = sample_df.pivot_table(index=subject, columns=condition, values=value, aggfunc="mean")
-        w = w.dropna()
-        if w.shape[0] < 3:
+    effectsize's own `kendalls_w` CI is a plain percentile bootstrap
+    (R's `boot::boot.ci(type="perc")`, R=200) resampling whole subjects
+    (rows of its internal subject x condition matrix) — the same
+    resampling unit this module already used. This uses BCa instead of
+    plain percentile for a tighter interval; see
+    test_effect_size_ci_coverage.py for the simulation-based validation
+    that warrants in place of exact fixture matching.
+    """
+
+    def _w(mat: np.ndarray) -> float:
+        n_rows, n_cols = mat.shape
+        if n_rows < 3:
             return float("nan")
-        f_stat, _ = stats.friedmanchisquare(*[w[c].to_numpy(dtype=float) for c in w.columns])
-        return float(f_stat / (w.shape[0] * (w.shape[1] - 1)))
+        f_stat, _ = stats.friedmanchisquare(*[mat[:, j] for j in range(n_cols)])
+        return float(f_stat / (n_rows * (n_cols - 1)))
 
+    wide = df.pivot(index=subject, columns=condition, values=value)
+    mat = wide.to_numpy(dtype=float)
+    estimate = _w(mat)
     # Resampling individual rows would break the within-subject structure
     # (a resampled "subject" could end up missing conditions); resample
-    # whole subjects instead.
-    ci_low, ci_high = _cluster_bootstrap_ci(_stat, df, subject, ci=ci)
-    return {"estimate": float(estimate), "ci_low": ci_low, "ci_high": ci_high}
+    # whole subjects (rows of the subject x condition matrix) instead.
+    ci_low, ci_high = _bca_matrix_row_bootstrap_ci(_w, mat, ci=ci)
+    return {"estimate": estimate, "ci_low": ci_low, "ci_high": ci_high}
 
 
 # --------------------------------------------------------------------------
@@ -542,35 +650,36 @@ def cramers_v(
     df: pd.DataFrame, a: str, b: str, bias_correct: bool = True, ci: float = 0.95
 ) -> dict[str, float]:
     """Cramer's V for an r x c contingency table (Bergsma's bias-corrected
-    version by default, matching effectsize::cramers_v(adjust=TRUE))."""
+    version by default, matching effectsize::cramers_v(adjust=TRUE)).
+
+    CI is one-sided via noncentral chi-square inversion on the raw phi
+    coefficient, then the same bias correction and k/l adjustment applied
+    to the point estimate (verified to ~1e-8 against R); ci_high fixed at 1.
+    """
     table = pd.crosstab(df[a], df[b]).to_numpy()
     chi2, _, _, _ = stats.chi2_contingency(table, correction=False)
     n = table.sum()
     r, c = table.shape
+    df_chi2 = (r - 1) * (c - 1)
+
+    phi_raw = np.sqrt(chi2 / n)
+    ncp_low = _ncx2_ci_low(chi2, df_chi2, ci)
+    phi_ci_low_raw = np.sqrt(ncp_low / n)
+
     if bias_correct:
-        phi2_tilde = max(0.0, chi2 / n - (r - 1) * (c - 1) / (n - 1))
-        r_tilde = r - (r - 1) ** 2 / (n - 1)
-        k_tilde = c - (c - 1) ** 2 / (n - 1)
-        estimate = float(np.sqrt(phi2_tilde / min(r_tilde - 1, k_tilde - 1)))
+        e = df_chi2 / (n - 1)
+        phi_adj = np.sqrt(max(0.0, phi_raw**2 - e))
+        phi_ci_low_adj = np.sqrt(max(0.0, phi_ci_low_raw**2 - e))
+        k_dim = r - (r - 1) ** 2 / (n - 1)
+        l_dim = c - (c - 1) ** 2 / (n - 1)
     else:
-        estimate = float(np.sqrt((chi2 / n) / (min(r, c) - 1)))
+        phi_adj, phi_ci_low_adj = phi_raw, phi_ci_low_raw
+        k_dim, l_dim = r, c
 
-    def _stat(sample_df: pd.DataFrame) -> float:
-        t = pd.crosstab(sample_df[a], sample_df[b]).to_numpy()
-        if t.shape[0] < 2 or t.shape[1] < 2:
-            return float("nan")
-        c2, _, _, _ = stats.chi2_contingency(t, correction=False)
-        nn = t.sum()
-        rr, cc = t.shape
-        if bias_correct:
-            p2 = max(0.0, c2 / nn - (rr - 1) * (cc - 1) / (nn - 1))
-            rt = rr - (rr - 1) ** 2 / (nn - 1)
-            kt = cc - (cc - 1) ** 2 / (nn - 1)
-            return float(np.sqrt(p2 / min(rt - 1, kt - 1)))
-        return float(np.sqrt((c2 / nn) / (min(rr, cc) - 1)))
-
-    ci_low, ci_high = bootstrap_effect_ci(_stat, df, ci=ci)
-    return {"estimate": estimate, "ci_low": ci_low, "ci_high": ci_high}
+    denom = np.sqrt(min(k_dim - 1, l_dim - 1))
+    estimate = float(phi_adj / denom)
+    ci_low = float(phi_ci_low_adj / denom)
+    return {"estimate": estimate, "ci_low": ci_low, "ci_high": 1.0}
 
 
 @register(
@@ -580,21 +689,20 @@ def cramers_v(
     code_template="edacore.effect_sizes.phi({df}, a={a!r}, b={b!r}, ci={ci})",
 )
 def phi(df: pd.DataFrame, a: str, b: str, ci: float = 0.95) -> dict[str, float]:
-    """Phi coefficient for a 2x2 table: sqrt(chi2/n), no continuity correction."""
+    """Phi coefficient for a 2x2 table: sqrt(chi2/n), no continuity correction.
+
+    CI is one-sided via noncentral chi-square inversion (verified to ~1e-9
+    against R); ci_high fixed at 1.
+    """
     table = pd.crosstab(df[a], df[b]).to_numpy()
     chi2, _, _, _ = stats.chi2_contingency(table, correction=False)
     n = table.sum()
+    r, c = table.shape
+    df_chi2 = (r - 1) * (c - 1)
     estimate = float(np.sqrt(chi2 / n))
-
-    def _stat(sample_df: pd.DataFrame) -> float:
-        t = pd.crosstab(sample_df[a], sample_df[b]).to_numpy()
-        if t.shape != (2, 2):
-            return float("nan")
-        c2, _, _, _ = stats.chi2_contingency(t, correction=False)
-        return float(np.sqrt(c2 / t.sum()))
-
-    ci_low, ci_high = bootstrap_effect_ci(_stat, df, ci=ci)
-    return {"estimate": estimate, "ci_low": ci_low, "ci_high": ci_high}
+    ncp_low = _ncx2_ci_low(chi2, df_chi2, ci)
+    ci_low = float(np.sqrt(ncp_low / n))
+    return {"estimate": estimate, "ci_low": ci_low, "ci_high": 1.0}
 
 
 @register(
@@ -604,20 +712,21 @@ def phi(df: pd.DataFrame, a: str, b: str, ci: float = 0.95) -> dict[str, float]:
     code_template="edacore.effect_sizes.cohens_w({df}, a={a!r}, b={b!r}, ci={ci})",
 )
 def cohens_w(df: pd.DataFrame, a: str, b: str, ci: float = 0.95) -> dict[str, float]:
-    """Cohen's w for an r x c table: sqrt(chi2/n) (the general-table analogue of phi)."""
+    """Cohen's w for an r x c table: sqrt(chi2/n) (the general-table analogue of phi).
+
+    CI is one-sided via noncentral chi-square inversion (verified to ~1e-9
+    against R); ci_high is capped at sqrt(min(nrow, ncol) - 1) (the largest
+    w an r x c table of this shape can produce), not 1 like phi/cramers_v.
+    """
     table = pd.crosstab(df[a], df[b]).to_numpy()
     chi2, _, _, _ = stats.chi2_contingency(table, correction=False)
     n = table.sum()
+    r, c = table.shape
+    df_chi2 = (r - 1) * (c - 1)
     estimate = float(np.sqrt(chi2 / n))
-
-    def _stat(sample_df: pd.DataFrame) -> float:
-        t = pd.crosstab(sample_df[a], sample_df[b]).to_numpy()
-        if t.shape[0] < 2 or t.shape[1] < 2:
-            return float("nan")
-        c2, _, _, _ = stats.chi2_contingency(t, correction=False)
-        return float(np.sqrt(c2 / t.sum()))
-
-    ci_low, ci_high = bootstrap_effect_ci(_stat, df, ci=ci)
+    ncp_low = _ncx2_ci_low(chi2, df_chi2, ci)
+    ci_low = float(np.sqrt(ncp_low / n))
+    ci_high = float(np.sqrt(min(r, c) - 1))
     return {"estimate": estimate, "ci_low": ci_low, "ci_high": ci_high}
 
 

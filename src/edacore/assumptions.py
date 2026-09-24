@@ -4,8 +4,10 @@ Every function returns an `AssumptionCheck` with a `status` and a
 one-sentence `consequence` written for a junior analyst (rule 1).
 
 Test statistics are verified against R (tests/fixtures/r_reference/) to
-1e-6. Two p-values are NOT bit-matched — see their docstrings and
-ARCHITECTURE.md Section 18's M2 changelog entry for what differs and why:
+1e-6 (check_sphericity_mauchly's exact port matches to ~1e-14). Two
+p-values are deliberately NOT bit-matched — kept on scipy/statsmodels'
+own methods rather than porting R's tables (see M2.1's ARCHITECTURE.md
+Section 18 changelog entry for the reasoning):
 
 - check_normality_anderson: scipy's `method="interpolate"` p-value uses a
   different reference table than R's `nortest::ad.test` (statistic matches
@@ -13,9 +15,6 @@ ARCHITECTURE.md Section 18's M2 changelog entry for what differs and why:
 - check_normality_lilliefors: statsmodels' `lilliefors()` p-value uses a
   different approximation than R's `nortest::lillie.test` (statistic
   matches to 1e-13; p-value differs by ~1.1e-2).
-- check_sphericity_mauchly: this module's chi-square approximation of
-  Mauchly's W gives a p-value ~1.4% relatively off R's (W itself matches
-  to 1e-9) — likely a small variant in the bias-correction constant.
 
 check_sample_size, check_independence_design, check_paired_structure, and
 check_measurement_level are deterministic (no test statistic), so they
@@ -679,21 +678,29 @@ def _helmert_contrasts(k: int) -> np.ndarray:
 def check_sphericity_mauchly(
     df: pd.DataFrame, subject: str, within: str, dv: str
 ) -> AssumptionCheck:
-    """Mauchly's test of sphericity for repeated-measures ANOVA. p-value
-    uses this module's own chi-square approximation, not R's exact one —
-    see module docstring."""
+    """Mauchly's test of sphericity for repeated-measures ANOVA.
+
+    Ports R's stats:::mauchly.test.SSD exactly, including its two-term
+    Box-type p-value correction (not just the leading chi-square term):
+    p = Pr(chi2_f > z) + w2 * (Pr(chi2_{f+4} > z) - Pr(chi2_f > z)).
+    Verified against the R fixture to ~1e-14.
+    """
     wide = df.pivot(index=subject, columns=within, values=dv)
-    n, k = wide.shape
+    n_subjects, k = wide.shape
     contrasts = _helmert_contrasts(k)
     y = wide.to_numpy() @ contrasts.T
     s = np.cov(y, rowvar=False, ddof=1)
-    p = k - 1
-    w = np.linalg.det(s) / (np.trace(s) / p) ** p
-    f = n - 1
-    d = 1 - (2 * p**2 + p + 2) / (6 * p * f)
-    chi2_stat = -f * d * np.log(w)
-    df_chi2 = p * (p + 1) / 2 - 1
-    p_value = float(stats.chi2.sf(chi2_stat, df_chi2))
+    p, pp = k, k - 1
+    w = np.linalg.det(s) / (np.trace(s) / pp) ** pp
+    n = n_subjects - 1  # residual df, as in lm(wide ~ 1)
+    rho = 1 - (2 * pp**2 + pp + 2) / (6 * pp * n)
+    w2_num = (pp + 2) * (pp - 1) * (pp - 2) * (2 * pp**3 + 6 * pp**2 + 3 * p + 2)
+    w2 = w2_num / (288 * (n * pp * rho) ** 2)
+    z = -n * rho * np.log(w)
+    f = pp * (pp + 1) / 2 - 1
+    pr1 = float(stats.chi2.sf(z, f))
+    pr2 = float(stats.chi2.sf(z, f + 4))
+    p_value = pr1 + w2 * (pr2 - pr1)
     return AssumptionCheck(
         fact_id=f"sphericity.mauchly.{dv}.{within}",
         assumption="sphericity",

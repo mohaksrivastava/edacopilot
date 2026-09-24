@@ -1353,6 +1353,77 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
 
+### 2026-09-24 — M2.1 (tag `m2.1`)
+Closes out M2's three real discrepancies and one solver-tolerance gap by
+reading `effectsize`'s actual R source rather than guessing at its methods
+— several M2 assumptions about which functions bootstrap turned out wrong.
+
+- **check_sphericity_mauchly**: ported R's exact two-term (Box-corrected)
+  p-value approximation (`stats:::mauchly.test.SSD`) instead of the
+  leading-term-only approximation M2 used. Now matches R to ~1e-14, not
+  ~1.4% off. `check_normality_anderson` and `check_normality_lilliefors`
+  keep their scipy/statsmodels defaults (maintainer's call — both are
+  within a reasonable 12-month-freshness bump of a newer scipy floor, see
+  below, so not a "fix this properly" gap the way Mauchly was).
+- **Noncentral-F CIs** (eta_squared, partial_eta_squared, omega_squared):
+  ported effectsize's actual `.get_ncp_F` + eta2 back-conversion — a
+  pseudo-F is reconstructed from the point estimate, inverted against
+  noncentral F, one-sided (ci_high fixed at 1). Matches R to ~1e-9.
+- **Noncentral chi-square CIs** (cramers_v, phi, cohens_w): ported
+  `.get_ncp_chi` the same way, including cramers_v's bias-correction and
+  k/l adjustment and cohens_w's different ci_high
+  (`sqrt(min(nrow,ncol)-1)`, not 1). cramers_v/phi verified to ~1e-8
+  against R; cohens_w's formula is implemented but unverified — the M2
+  fixture never captured its CI, so there's nothing to check it against
+  yet (added to the R script, pending a rerun).
+- **rank_biserial, cliffs_delta**: M2 assumed these bootstrap in R. They
+  don't — `effectsize::rank_biserial`'s CI is an exact closed form
+  (Fisher-z transform, analytic SE), and `cliffs_delta` just calls
+  `rank_biserial` internally. Ported the exact formula; matches R to
+  ~1e-13. No more bootstrap here at all.
+- **kendalls_w, epsilon_squared**: M2 also assumed noncentral-F for
+  epsilon_squared specifically (grouping it with eta2/omega2) — wrong too:
+  `rank_epsilon_squared`'s formula-interface path is a plain percentile
+  bootstrap resampling *within each group* (R's `boot::boot.ci(type=
+  "perc")`, R=200), and `kendalls_w`'s is the same but resampling whole
+  subjects. Both now use BCa instead of R's plain percentile (per
+  instruction) — no fixture to bit-match either way, since a bootstrap's
+  specific draws are inherently RNG-dependent. Validated by simulated
+  coverage instead (500 trials, `test_effect_size_ci_coverage.py`, marked
+  slow): epsilon_squared lands inside the specified [93%, 97%] band;
+  **kendalls_w came in at 91.4%**, below it. This is a known finite-sample
+  property of BCa at moderate n (25 subjects here), not a caught bug — but
+  it wasn't silently loosened to pass; flagged for the maintainer to
+  decide (widen the tolerance, grow the test's sample size, or investigate
+  further).
+- **Performance**: the initial BCa implementation rebuilt a pandas
+  DataFrame (concat + relabel) on every one of 2000 bootstrap iterations
+  plus jackknife — a single kendalls_w call took 96.7s. Rewrote both
+  bootstraps to resample numpy arrays directly (no DataFrame in the hot
+  loop): same call now takes 0.39s, ~250x faster, bit-identical results.
+  This wasn't cosmetic — at the original speed the full test suite would
+  have taken over an hour.
+- **scipy floor for `anderson(method=...)`**: traced to scipy 1.17.0
+  (released 2026-01-10, ~8.5 months before this entry) via direct
+  wheel-by-wheel testing in a real Python 3.11 environment (see below) —
+  within the 12-month freshness threshold, so per instruction this was a
+  question for the maintainer, not an automatic bump. Decision: keep the
+  floor at scipy>=1.13 and the hand-written fallback (verified
+  bit-identical to the modern API).
+- **Local verification environment**: installed Python 3.11.9 (this
+  machine's default is 3.13, for which several declared-minimum package
+  versions have no prebuilt wheels — e.g. scipy 1.14.0 tries to compile
+  from source and fails with no C compiler available) at
+  `.venv311/` (gitignored). Used it to determine the scipy floor above by
+  installing actual historical scipy releases, not guessing from
+  changelogs.
+- `generate_r_fixtures.R`: `write_fixture()` now recursively rejects any
+  NULL or NA value before writing, with a message naming the exact path
+  (e.g. `cliffs_delta__two_groups_equal_var.estimate`) — this is the
+  validation that would have caught M2's `cliffs_delta`/
+  `partial_eta_squared` silent-NULL bugs immediately instead of needing
+  manual inspection to find them.
+
 ### 2026-09-24 — M2 (tag `m2`)
 - `edacore.assumptions`: all 23 Section 6.6 checks. 19 have a computable
   statistic and are verified against R fixtures; `check_sample_size`,

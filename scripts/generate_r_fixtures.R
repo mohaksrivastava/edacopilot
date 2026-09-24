@@ -11,18 +11,22 @@
 #   <name>.json        the R function's output, at full double precision
 #
 # Scope: ARCHITECTURE.md Section 6.6 (assumption checks) and Section 6.8
-# (effect sizes, multiplicity, power) — the functions milestone M2 covers.
-# Section 6.7 (hypothesis tests) is M3's; add its fixtures alongside that
-# work, not here.
+# (effect sizes, multiplicity, power) from M2/M2.1, plus Section 6.7's
+# one-sample, two-independent-group, and two-paired-group hypothesis tests
+# from M3 part 1. The rest of Section 6.7 (k-group, factorial, categorical
+# association, correlation) is later M3 work; add its fixtures alongside
+# that, not here.
 
 required_packages <- c(
-  "jsonlite",   # fixture output
-  "nortest",    # Anderson-Darling, Lilliefors
-  "moments",    # skewness, kurtosis, D'Agostino test
-  "car",        # Levene's test, VIF, Durbin-Watson
-  "lmtest",     # Breusch-Pagan, Harvey-Collier, RESET
-  "effectsize", # cohens_d, hedges_g, glass_delta, eta/omega/epsilon^2, ...
-  "pwr"         # power analysis
+  "jsonlite",       # fixture output
+  "nortest",        # Anderson-Darling, Lilliefors
+  "moments",        # skewness, kurtosis, D'Agostino test
+  "car",            # Levene's test, VIF, Durbin-Watson
+  "lmtest",         # Breusch-Pagan, Harvey-Collier, RESET
+  "effectsize",     # cohens_d, hedges_g, glass_delta, eta/omega/epsilon^2, ...
+  "pwr",            # power analysis
+  "WRS2",           # yuen_trimmed_t (M3)
+  "brunnermunzel"   # brunner_munzel (M3)
 )
 missing_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly = TRUE)]
 if (length(missing_packages) > 0) {
@@ -47,7 +51,34 @@ out_dir <- file.path(repo_root, "tests", "fixtures", "r_reference")
 data_dir <- file.path(out_dir, "data")
 dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
 
+# Recursively checks a fixture for NULL/NA before it's written. A NULL
+# almost always means a column name that doesn't exist on the R object
+# (silently returns NULL via `$`) -- exactly the bug that produced
+# cliffs_delta's and partial_eta_squared's first (empty) fixtures in M2.
+# NA usually means an upstream computation failed quietly. Either way it's
+# a bug to fix in this script, never something to work around downstream.
+check_no_null_na <- function(obj, path) {
+  if (is.null(obj)) {
+    stop("Fixture value is NULL at '", path, "' -- likely a wrong column name ",
+         "(R's $ returns NULL silently); fix the source computation, don't ",
+         "patch around it downstream.")
+  }
+  if (is.list(obj)) {
+    nms <- names(obj)
+    for (i in seq_along(obj)) {
+      key <- if (!is.null(nms) && nzchar(nms[i])) nms[i] else as.character(i)
+      check_no_null_na(obj[[i]], paste0(path, ".", key))
+    }
+  } else if ((is.numeric(obj) || is.logical(obj)) && any(is.na(obj))) {
+    stop("Fixture value is NA at '", path, "' -- an upstream computation ",
+         "failed quietly; fix the source computation, don't patch around ",
+         "it downstream.")
+  }
+  invisible(NULL)
+}
+
 write_fixture <- function(name, obj) {
+  check_no_null_na(obj, name)
   jsonlite::write_json(obj, file.path(out_dir, paste0(name, ".json")), auto_unbox = TRUE, digits = 15, na = "null")
   invisible(NULL)
 }
@@ -494,7 +525,8 @@ chi_3x3 <- chisq.test(contingency_3x3)
 es_w <- effectsize::cohens_w(contingency_3x3)
 write_fixture("cohens_w__contingency_3x3", list(
   r_function = "effectsize::cohens_w", data = "contingency_3x3.csv",
-  chisq_statistic = unname(chi_3x3$statistic), estimate = es_w$Cohens_w
+  chisq_statistic = unname(chi_3x3$statistic), estimate = es_w$Cohens_w,
+  ci_low = es_w$CI_low, ci_high = es_w$CI_high
 ))
 
 # ---------------------------------------------------------------------------
@@ -541,6 +573,177 @@ pwr_mde_t <- pwr::pwr.t.test(n = 40, sig.level = 0.05, power = 0.8, type = "two.
 write_fixture("minimum_detectable_effect__two_sample_t", list(
   r_function = "pwr::pwr.t.test", n = 40, sig.level = 0.05, power = 0.8,
   d = pwr_mde_t$d
+))
+
+# ---------------------------------------------------------------------------
+# 6.7 Hypothesis tests: one sample, two independent groups, two paired
+# groups (M3 part 1). Reuses normal_sample, two_groups_equal_var/
+# unequal_var, and paired_before/paired_after from the M2 section above.
+# ---------------------------------------------------------------------------
+
+## One sample --------------------------------------------------------------
+
+mu0 <- 48
+
+t1 <- t.test(normal_sample, mu = mu0)
+write_fixture("one_sample_t__normal_sample", list(
+  r_function = "stats::t.test", data = "normal_sample.csv", mu0 = mu0,
+  statistic = unname(t1$statistic), df = unname(t1$parameter), p_value = t1$p.value,
+  estimate = unname(t1$estimate), ci_low = t1$conf.int[1], ci_high = t1$conf.int[2]
+))
+
+w1 <- wilcox.test(normal_sample, mu = mu0, conf.int = TRUE)
+write_fixture("wilcoxon_one_sample__normal_sample", list(
+  r_function = "stats::wilcox.test", data = "normal_sample.csv", mu0 = mu0,
+  statistic = unname(w1$statistic), p_value = w1$p.value
+))
+
+# Sign test = binomial test on the sign of (x - mu0), ties excluded.
+signs <- normal_sample - mu0
+n_pos <- sum(signs > 0)
+n_nonzero <- sum(signs != 0)
+sign_result <- binom.test(n_pos, n_nonzero, p = 0.5)
+write_fixture("sign_test__normal_sample", list(
+  r_function = "stats::binom.test on sign(x - mu0)", data = "normal_sample.csv", mu0 = mu0,
+  n_positive = n_pos, n_nonzero = n_nonzero,
+  statistic = unname(sign_result$statistic), p_value = sign_result$p.value,
+  estimate = unname(sign_result$estimate)
+))
+
+n_binom <- 60
+binary_sample <- rbinom(n_binom, 1, 0.35)
+write_data("binary_sample", data.frame(x = binary_sample))
+
+p0 <- 0.5
+bt <- binom.test(sum(binary_sample), n_binom, p = p0)
+write_fixture("binomial_test__binary_sample", list(
+  r_function = "stats::binom.test", data = "binary_sample.csv", p0 = p0,
+  successes = sum(binary_sample), n = n_binom,
+  statistic = unname(bt$statistic), p_value = bt$p.value, estimate = unname(bt$estimate),
+  ci_low = bt$conf.int[1], ci_high = bt$conf.int[2]
+))
+
+category_counts <- c(A = 18, B = 25, C = 30, D = 12)
+write_data(
+  "category_counts",
+  data.frame(category = names(category_counts), count = as.integer(category_counts))
+)
+expected_probs <- c(A = 0.2, B = 0.3, C = 0.3, D = 0.2)
+cgof <- chisq.test(category_counts, p = expected_probs)
+write_fixture("chi2_goodness_of_fit__category_counts", list(
+  r_function = "stats::chisq.test", data = "category_counts.csv",
+  expected_probs = unname(expected_probs),
+  statistic = unname(cgof$statistic), df = unname(cgof$parameter), p_value = cgof$p.value
+))
+
+## Two independent groups ---------------------------------------------------
+
+st_eq <- t.test(value ~ group, data = two_groups_equal_var, var.equal = TRUE)
+write_fixture("student_t__two_groups_equal_var", list(
+  r_function = "stats::t.test(var.equal=TRUE)", data = "two_groups_equal_var.csv",
+  statistic = unname(st_eq$statistic), df = unname(st_eq$parameter), p_value = st_eq$p.value,
+  estimate_diff = unname(st_eq$estimate[1] - st_eq$estimate[2]),
+  ci_low = st_eq$conf.int[1], ci_high = st_eq$conf.int[2]
+))
+
+wt_uneq <- t.test(value ~ group, data = two_groups_unequal_var, var.equal = FALSE)
+write_fixture("welch_t__two_groups_unequal_var", list(
+  r_function = "stats::t.test(var.equal=FALSE)", data = "two_groups_unequal_var.csv",
+  statistic = unname(wt_uneq$statistic), df = unname(wt_uneq$parameter), p_value = wt_uneq$p.value,
+  estimate_diff = unname(wt_uneq$estimate[1] - wt_uneq$estimate[2]),
+  ci_low = wt_uneq$conf.int[1], ci_high = wt_uneq$conf.int[2]
+))
+
+yuen_result <- WRS2::yuen(value ~ group, data = two_groups_unequal_var, tr = 0.2)
+write_fixture("yuen_trimmed_t__two_groups_unequal_var", list(
+  r_function = "WRS2::yuen(tr=0.2)", data = "two_groups_unequal_var.csv",
+  statistic = unname(yuen_result$test), df = unname(yuen_result$df),
+  p_value = yuen_result$p.value, estimate_diff = unname(yuen_result$diff),
+  ci_low = yuen_result$conf.int[1], ci_high = yuen_result$conf.int[2]
+))
+
+mw <- wilcox.test(value ~ group, data = two_groups_equal_var, conf.int = TRUE)
+write_fixture("mann_whitney__two_groups_equal_var", list(
+  r_function = "stats::wilcox.test", data = "two_groups_equal_var.csv",
+  statistic = unname(mw$statistic), p_value = mw$p.value
+))
+
+bm <- brunnermunzel::brunnermunzel.test(value ~ group, data = two_groups_equal_var)
+write_fixture("brunner_munzel__two_groups_equal_var", list(
+  r_function = "brunnermunzel::brunnermunzel.test", data = "two_groups_equal_var.csv",
+  statistic = unname(bm$statistic), df = unname(bm$parameter), p_value = bm$p.value,
+  estimate = unname(bm$estimate)
+))
+
+ks2 <- suppressWarnings(ks.test(
+  two_groups_equal_var$value[two_groups_equal_var$group == "A"],
+  two_groups_equal_var$value[two_groups_equal_var$group == "B"]
+))
+write_fixture("ks_two_sample__two_groups_equal_var", list(
+  r_function = "stats::ks.test", data = "two_groups_equal_var.csv",
+  statistic = unname(ks2$statistic), p_value = ks2$p.value
+))
+
+# Permutation test: the observed statistic is deterministic and IS
+# compared exactly; the p-value is RNG-dependent (R and Python permute
+# differently even from the same conceptual algorithm) so Python's tests
+# compare it with a loose tolerance instead of exact equality.
+perm_a <- two_groups_equal_var$value[two_groups_equal_var$group == "A"]
+perm_b <- two_groups_equal_var$value[two_groups_equal_var$group == "B"]
+observed_diff <- mean(perm_a) - mean(perm_b)
+set.seed(20260101)
+n_perm <- 10000
+combined <- c(perm_a, perm_b)
+n_a <- length(perm_a)
+perm_diffs <- replicate(n_perm, {
+  shuffled <- sample(combined)
+  mean(shuffled[1:n_a]) - mean(shuffled[(n_a + 1):length(combined)])
+})
+perm_p <- mean(abs(perm_diffs) >= abs(observed_diff))
+write_fixture("permutation_test_2s__two_groups_equal_var", list(
+  r_function = "manual permutation (n_perm=10000, seed=20260101)",
+  data = "two_groups_equal_var.csv",
+  observed_diff = observed_diff, p_value = perm_p, n_perm = n_perm
+))
+
+## Two paired groups ---------------------------------------------------------
+
+pt <- t.test(paired_after, paired_before, paired = TRUE)
+write_fixture("paired_t__paired_before_after", list(
+  r_function = "stats::t.test(paired=TRUE)", data = "paired_before_after.csv",
+  statistic = unname(pt$statistic), df = unname(pt$parameter), p_value = pt$p.value,
+  estimate = unname(pt$estimate), ci_low = pt$conf.int[1], ci_high = pt$conf.int[2]
+))
+
+wsr <- wilcox.test(paired_after, paired_before, paired = TRUE, conf.int = TRUE)
+write_fixture("wilcoxon_signed_rank__paired_before_after", list(
+  r_function = "stats::wilcox.test(paired=TRUE)", data = "paired_before_after.csv",
+  statistic = unname(wsr$statistic), p_value = wsr$p.value
+))
+
+diffs <- paired_after - paired_before
+n_pos_p <- sum(diffs > 0)
+n_nonzero_p <- sum(diffs != 0)
+sign_paired <- binom.test(n_pos_p, n_nonzero_p, p = 0.5)
+write_fixture("sign_test_paired__paired_before_after", list(
+  r_function = "stats::binom.test on sign(after - before)", data = "paired_before_after.csv",
+  n_positive = n_pos_p, n_nonzero = n_nonzero_p,
+  statistic = unname(sign_paired$statistic), p_value = sign_paired$p.value,
+  estimate = unname(sign_paired$estimate)
+))
+
+observed_diff_paired <- mean(diffs)
+set.seed(20260102)
+n_perm_paired <- 10000
+perm_diffs_paired <- replicate(n_perm_paired, {
+  signs_rand <- sample(c(-1, 1), length(diffs), replace = TRUE)
+  mean(diffs * signs_rand)
+})
+perm_p_paired <- mean(abs(perm_diffs_paired) >= abs(observed_diff_paired))
+write_fixture("permutation_test_paired__paired_before_after", list(
+  r_function = "manual sign-flip permutation (n_perm=10000, seed=20260102)",
+  data = "paired_before_after.csv",
+  observed_diff = observed_diff_paired, p_value = perm_p_paired, n_perm = n_perm_paired
 ))
 
 cat("Wrote fixtures to", out_dir, "\n")
