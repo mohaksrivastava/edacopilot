@@ -1483,6 +1483,15 @@ and post-hoc procedures `tukey_hsd`, `games_howell`, `dunn_test`,
   source) — Cochran's Q is exactly Friedman's test applied to binary
   data, so `cochran_q` calls the same `scipy.stats.friedmanchisquare`
   path as `friedman`.
+- **`test-min-versions` CI failure, root-caused and fixed**: `tukey_hsd`
+  used `TukeyHSDResults.group_t`/`.group_c`, which don't exist at all on
+  statsmodels 0.14.0 (this project's declared floor) — confirmed by
+  installing exactly that pinned version in a throwaway venv and
+  reproducing the `AttributeError` directly, then rerunning the full fast
+  suite against it after the fix. Replaced with
+  `itertools.combinations(result.groupsunique, 2)`, which `meandiffs`/
+  `pvalues`/`confint` are documented to follow (it's the same order the
+  printed summary table uses) and is stable across the version range.
 
 ### 2026-09-24 — M3.1.1 (tag `m3.1.1`)
 CI restructuring, ahead of M3 part 2a:

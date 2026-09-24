@@ -61,21 +61,25 @@ def tukey_hsd(
     clean = _clean_k_groups(df, outcome, group, nan_policy, warnings)
 
     result = pairwise_tukeyhsd(clean[outcome].to_numpy(), clean[group].to_numpy())
-    # statsmodels' meandiffs/confint are mean(group_t) - mean(group_c), so
-    # group_a=group_t/group_b=group_c keeps `estimate` = mean(group_a) -
-    # mean(group_b), matching R's own "later - earlier" labeling exactly.
+    # `.group_t`/`.group_c` aren't available on statsmodels 0.14.0 (this
+    # project's declared floor); `meandiffs`/`confint`/`pvalues` are
+    # documented to follow itertools.combinations(groupsunique, 2) order
+    # instead, which is stable across versions. Those arrays are
+    # mean(second) - mean(first) for each (first, second) pair, so
+    # group_a=second/group_b=first keeps `estimate` = mean(group_a) -
+    # mean(group_b), matching R's own "later - earlier" labeling.
+    pairs = list(itertools.combinations(result.groupsunique, 2))
     comparisons = [
         PairwiseComparison(
-            group_a=str(a),
-            group_b=str(b),
+            group_a=str(b),
+            group_b=str(a),
             estimate=float(diff),
             p_value=float(p),
             p_adjusted=float(p),
             ci=(float(lo), float(hi)),
         )
-        for a, b, diff, p, lo, hi in zip(
-            result.group_t,
-            result.group_c,
+        for (a, b), diff, p, lo, hi in zip(
+            pairs,
             result.meandiffs,
             result.pvalues,
             result.confint[:, 0],
