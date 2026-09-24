@@ -1,0 +1,1 @@
+{"r_function":"TOSTER::t_TOST(eqbound_type='raw', the default)","data":"tost_equivalence_data.csv","low_bound":-1.5,"high_bound":1.5,"t_lower":1.480447560279132,"p_lower":0.07264413447237864,"t_upper":-4.106748074339498,"p_upper":7.762527606748436e-05,"df":48}

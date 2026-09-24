@@ -1409,6 +1409,112 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
 
+### 2026-09-25 — M3 part 2b (tag `m3.2b`)
+Section 6.7's factorial, categorical association, correlation, and
+distribution/equivalence/other tests: `two_way_anova`,
+`aligned_rank_transform_anova`, `chi2_independence`, `fisher_exact`,
+`g_test`, `mcnemar`, `two_proportion_z`, `cochran_armitage_trend`,
+`pearson`, `spearman`, `kendall_tau`, `point_biserial`,
+`partial_correlation`, `distance_correlation`, `mutual_information`,
+`correlation_matrix`, `anderson_ksamp`, `tost_equivalence`, `runs_test`
+(19 functions; `two_way_anova`, `aligned_rank_transform_anova` and
+`correlation_matrix` return `list[TestResult]`, one per term/pair — each is
+its own omnibus test for Section 12.3's ledger rule).
+
+- **New R packages** (6): `ARTool`, `ppcor`, `energy`, `kSamples`,
+  `TOSTER`, `randtests` (`car`, `DescTools` already present). Per the
+  process rule, the R script was run fully and every pre-existing fixture
+  diffed against a pre-edit backup before any Python was written: none
+  changed; 18 fixtures + 9 datasets added.
+- **Your continuity-correction decision** (match R everywhere):
+  `chi2_independence` needed nothing (scipy's `chi2_contingency` already
+  defaults to Yates at df=1, same as `chisq.test`); `two_proportion_z`:
+  R's `prop.test` for two samples is exactly a Yates-corrected 2x2
+  chi-square (read from its source), so statistic/p reuse
+  `chi2_contingency(correction=True)` and only the CI (R's
+  continuity-corrected Wald interval) is ported; statsmodels has no
+  Yates-style option (`test_proportions_2indep`'s `correction` is a
+  Miettinen-Nurminen df correction, unrelated). `mcnemar`: corrected by
+  default.
+- **Real bug found in shipped M3 part 2a code**: `mcnemar_posthoc` (and
+  the new `mcnemar`) applied the continuity correction unconditionally.
+  R's `mcnemar.test` only corrects when the off-diagonals differ
+  (`any(x - t(x) != 0)`); for b01 == b10 the statistic must be exactly 0
+  but came out (|0|-1)^2/n != 0. The 2a fixture never had a symmetric
+  pair, so it slipped through; caught here by the new fixture. Fixed in
+  both places, with a regression test.
+- **Type III SS trap**: confirmed on the unbalanced fixture that default
+  treatment contrasts give a qualitatively wrong answer (factor_b p=0.034
+  vs. 0.0006 with sum-to-zero contrasts). `typ=3` uses `C(x, Sum)`;
+  matches `car::Anova(type=3)` with `contr.sum` to ~1e-12. `typ=2` (the
+  spec's default) is contrast-invariant and needs no fix, and has no R
+  fixture of its own (only Type III was requested as the trap).
+- **ART ANOVA**: ported the alignment procedure (align per effect,
+  rank, keep only that effect's Type III F row); matches `ARTool::art +
+  anova` on all three terms to ~1e-12. Two-factor designs only.
+- **Odds ratio**: three different quantities exist (sample ad/bc = 3.5;
+  scipy `fisher_exact`'s unconditional MLE; R's conditional MLE 3.4536).
+  `fisher_exact` reports the conditional MLE via
+  `contingency.odds_ratio(kind="conditional")`, labelled
+  `odds_ratio_conditional_mle`. It agrees with R to ~2.5e-5 relative, not
+  1e-6: same estimand, two root-finders (scipy's `brentq(xtol=1e-13)` on a
+  steep noncentral-hypergeometric mean vs R's). Tested at 1e-4, with the
+  reason in the test — a numerical-solver tolerance like the resampling
+  carve-out in Section 15.1, not a methodology difference.
+- **Fisher r×c — your decision**: scipy's exact p-value (0.0002 here) and
+  R's `fisher.test` (0.0001001) are both exact but use different
+  "as extreme" conventions; kept scipy's, documented and warned in the
+  result. **Floor finding**: r×c needs scipy>=1.15; at the declared floor
+  (1.13) `fisher_exact` is 2×2-only (found by running the suite in a
+  venv pinned to the exact floor versions before pushing). Rather than
+  raise the floor silently, r×c raises a clear "needs scipy>=1.15" error
+  there and its test skips. Raising the floor to 1.15 is a one-line
+  change if you prefer it.
+- **G-test**: `DescTools::GTest` defaults to `correct="none"` (not
+  Williams); ported its exact formula, Williams available as an option.
+- **Cochran-Armitage**: ported `DescTools::CochranArmitageTest`'s formula
+  (integer scores 1..k). The sign depends on which outcome level is the
+  "event" (R uses the table's first column), so `event` is explicit.
+- **Spearman/Kendall exact p-values**: real gap. scipy's `spearmanr` has no
+  exact mode (asymptotic p=0.0039 vs R's exact 0.00724 on the n=8
+  fixture, ~2x). Implemented exact mode as full permutation enumeration
+  bounded by `MAX_EXACT_PERMUTATIONS` (bit-identical to R at n=8).
+  **Limitation, disclosed in results**: that only covers n<=8 (n! grows
+  fast), whereas R stays exact to n<1290 (Spearman) / n<50 (Kendall) via
+  specialised algorithms — so for n≈9-49 without ties this module falls
+  back to the asymptotic p-value and may differ from R; a warning says so.
+  Kendall with ties already matched R via scipy's `method="auto"`.
+- **Statistic-field convention fix**: `pearson`/`point_biserial` initially
+  put r in `statistic` (scipy's `.statistic`) while R's, and this
+  codebase's, `statistic` is the test statistic that drives the p-value;
+  now `t`, with r in `estimate`. `kendall_tau`'s `statistic` is R's
+  tie-corrected z (ported from `cor.test`'s source), tau in `estimate`.
+- **Partial correlation** ported from the precision-matrix formulation
+  (general in the number of covariates), ~1e-9 vs `ppcor::pcor.test`.
+  **Distance correlation** statistic matches `energy::dcor` to ~1e-9; its
+  permutation p-value cannot match R (RNG) and is tested by simulation
+  (tiny under y=x², rarely significant under independence).
+- **Mutual information**: no R reference. Implemented a KSG k-NN
+  estimator on `scipy.spatial.cKDTree` rather than
+  `sklearn.feature_selection.mutual_info_regression`, which fails to
+  import in this environment (Application Control blocks
+  `_expected_mutual_info_fast` — the same local-only class of problem as
+  mypy's DLL earlier), so it could not be verified. Tested against
+  -0.5*ln(1-rho^2) at rho 0.3/0.7, n=1500, tolerance 0.05 nats (measured
+  |bias| <= ~0.015 at n=3000; the tolerance is far smaller than the
+  effect being distinguished).
+- **anderson_ksamp**: scipy's statistic equals R's standardized T.AD
+  (version 2); R's fixture is stored rounded to 3 decimals so it's
+  compared at 1e-3. scipy's p-value is floored at 0.001 (R: 1e-13), and
+  capped at 0.25 above; both are disclosed in `warnings`.
+- **TOST**: bounds are RAW (outcome units), matching TOSTER's default
+  `eqbound_type="raw"`; stated in the result and docstring. p-value is
+  max of the two one-sided p-values. **Runs test**: median dichotomization
+  (values equal to the median dropped) and normal approximation, matching
+  `randtests::runs.test` defaults. Its fixture happens to land at exactly
+  z=0, so directionality is additionally tested on clustered/alternating
+  sequences.
+
 ### 2026-09-25 — M3.2a.1 (tag `m3.2a.1`)
 Pre-work for M3 part 2b, no new stattests functions:
 

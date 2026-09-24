@@ -1,0 +1,1 @@
+{"r_function":"stats::mcnemar.test(correct=TRUE, the default)","data":"paired_binary.csv","table_00":14,"table_01":7,"table_10":7,"table_11":12,"statistic":0,"df":1,"p_value":1}

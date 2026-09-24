@@ -1,0 +1,1 @@
+{"r_function":"ARTool::art + anova","data":"factorial_unbalanced.csv","terms":["factor_a","factor_b","factor_a:factor_b"],"df1":[1,1,1],"df2":[25,25,25],"statistic":[4.218331536604126,59.932568363910029,15.225160829163691],"p_value":[0.05058810643388418,4.252747952138544e-08,0.0006370652756525226]}

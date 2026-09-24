@@ -1,0 +1,1 @@
+{"r_function":"randtests::runs.test(threshold=median(x), pvalue='normal', both defaults)","data":"runs_test_data.csv","statistic":0,"n_runs":16,"n1":15,"n2":15,"p_value":1}

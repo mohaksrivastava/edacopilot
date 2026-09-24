@@ -1,0 +1,1 @@
+{"r_function":"stats::cor.test(method='spearman') (exact, no ties, n<1290)","data":"correlation_small_no_ties.csv","estimate":0.880952380952381,"statistic":9.999999999999993,"p_value":0.007242063492063492}

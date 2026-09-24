@@ -1,0 +1,1 @@
+{"r_function":"stats::prop.test(correct=TRUE, the default)","x1":34,"n1":80,"x2":21,"n2":75,"statistic":2.949961174242423,"df":1,"p_value":0.08587962125448843,"ci_low":-0.01644376032760414,"ci_high":0.3064437603276041}

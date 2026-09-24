@@ -1,0 +1,1 @@
+{"r_function":"stats::cor.test(method='pearson')","data":"correlation_small_no_ties.csv","estimate":0.8899140439670455,"statistic":4.778996367419436,"df":6,"p_value":0.003065991840615739,"ci_low":0.4967559362842136,"ci_high":0.9800188087543087}

@@ -1,0 +1,1 @@
+{"r_function":"stats::fisher.test","data":"contingency_2x2.csv","p_value":0.004635020180798918,"odds_ratio_conditional_mle":3.453558208458513,"ci_low":1.418083017970118,"ci_high":8.731275485613237}

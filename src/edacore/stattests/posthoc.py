@@ -449,7 +449,12 @@ def mcnemar_posthoc(
         )
         b01, b10 = table[0, 1], table[1, 0]
         n_disc = b01 + b10
-        if n_disc == 0:
+        if b01 == b10:
+            # stats::mcnemar.test only applies the continuity correction
+            # when the off-diagonal counts differ (its source: `any(x -
+            # t(x) != 0)`) -- applying it unconditionally would make an
+            # exactly-symmetric table (statistic should be exactly 0)
+            # come out nonzero instead, since (|0| - 1)^2 = 1 != 0.
             stat, p_val = 0.0, 1.0
         else:
             stat = float((abs(b01 - b10) - 1) ** 2 / n_disc)

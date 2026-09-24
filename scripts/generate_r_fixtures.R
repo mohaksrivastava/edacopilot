@@ -21,9 +21,11 @@
 # (effect sizes, multiplicity, power) from M2/M2.1; Section 6.7's
 # one-sample, two-independent-group, and two-paired-group hypothesis tests
 # from M3 part 1; Section 6.7's k-independent-group, k-related-group, and
-# post-hoc tests from M3 part 2a. Factorial, categorical association, and
-# correlation (the rest of Section 6.7) are later M3 work; add fixtures
-# alongside that, not here.
+# post-hoc tests from M3 part 2a; Section 6.7's factorial, categorical
+# association, correlation, and distribution/equivalence/other tests from
+# M3 part 2b. mutual_information has no R reference (tested against the
+# analytic bivariate-normal formula in Python instead) and needs no
+# fixture here.
 
 required_packages <- c(
   "jsonlite",       # fixture output
@@ -38,8 +40,14 @@ required_packages <- c(
   "PMCMRplus",      # Games-Howell, Friedman post-hoc Nemenyi/Conover (M3 part 2a)
   "FSA",            # Dunn's test, matched at its default (two-sided, Holm) (M3 part 2a)
   "afex",           # repeated-measures ANOVA with GG/HF correction (M3 part 2a)
-  "DescTools",      # Cochran's Q (M3 part 2a)
-  "onewaytests"     # Alexander-Govern test (M3 part 2a)
+  "DescTools",      # Cochran's Q, G-test, Cochran-Armitage trend (M3 part 2a/2b)
+  "onewaytests",    # Alexander-Govern test (M3 part 2a)
+  "ARTool",         # aligned rank transform ANOVA (M3 part 2b)
+  "ppcor",          # partial correlation (M3 part 2b)
+  "energy",         # distance correlation statistic (M3 part 2b)
+  "kSamples",       # Anderson-Darling k-sample (M3 part 2b)
+  "TOSTER",         # TOST equivalence testing (M3 part 2b)
+  "randtests"       # runs test (M3 part 2b)
 )
 missing_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly = TRUE)]
 if (length(missing_packages) > 0) {
@@ -990,6 +998,239 @@ write_fixture("cochran_q_posthoc__cochran_q_binary", list(
   data = "cochran_q_binary.csv",
   comparisons = sapply(cq_pairs, paste, collapse = " - "),
   statistic = unname(mcn_stat), p_unadj = unname(mcn_p), p_adj = unname(mcn_p_adj)
+))
+
+# ---------------------------------------------------------------------------
+# 6.7 Hypothesis tests: factorial, categorical association, correlation,
+# and distribution/equivalence/other (M3 part 2b). Reuses contingency_2x2/
+# contingency_3x3 from the M2 section above where the table shape fits.
+# ---------------------------------------------------------------------------
+
+## Factorial -------------------------------------------------------------
+
+# Deliberately UNBALANCED 2x2 factorial: balanced data hides the Type III
+# sum-to-zero-contrasts requirement (with balanced cells, Type III SS is
+# the same regardless of contrast coding).
+n_f <- c(8, 5, 10, 6)
+factorial_unbalanced <- data.frame(
+  value = c(
+    rnorm(n_f[1], 10, 2), rnorm(n_f[2], 12, 2),
+    rnorm(n_f[3], 9, 2), rnorm(n_f[4], 14, 2)
+  ),
+  factor_a = factor(rep(c("A1", "A1", "A2", "A2"), n_f)),
+  factor_b = factor(rep(c("B1", "B2", "B1", "B2"), n_f))
+)
+write_data("factorial_unbalanced", factorial_unbalanced)
+
+old_contrasts <- options(contrasts = c("contr.sum", "contr.poly"))
+fit_2way <- aov(value ~ factor_a * factor_b, data = factorial_unbalanced)
+anova_2way <- car::Anova(fit_2way, type = 3)
+options(old_contrasts)
+write_fixture("two_way_anova__factorial_unbalanced", list(
+  r_function = "car::Anova(aov(...), type=3) with contr.sum/contr.poly",
+  data = "factorial_unbalanced.csv",
+  terms = rownames(anova_2way)[-c(1, nrow(anova_2way))],
+  sum_sq = unname(anova_2way[["Sum Sq"]][-c(1, nrow(anova_2way))]),
+  df = unname(anova_2way[["Df"]][-c(1, nrow(anova_2way))]),
+  statistic = unname(anova_2way[["F value"]][-c(1, nrow(anova_2way))]),
+  p_value = unname(anova_2way[["Pr(>F)"]][-c(1, nrow(anova_2way))]),
+  df_residual = unname(anova_2way[["Df"]][nrow(anova_2way)]),
+  ss_residual = unname(anova_2way[["Sum Sq"]][nrow(anova_2way)])
+))
+
+art_fit <- ARTool::art(value ~ factor_a * factor_b, data = factorial_unbalanced)
+art_anova <- anova(art_fit)
+write_fixture("art_anova__factorial_unbalanced", list(
+  r_function = "ARTool::art + anova", data = "factorial_unbalanced.csv",
+  terms = art_anova$Term,
+  df1 = art_anova$Df, df2 = art_anova$Df.res,
+  statistic = art_anova$`F value`, p_value = art_anova$`Pr(>F)`
+))
+
+## Categorical association -------------------------------------------------
+
+chi_2x2 <- chisq.test(contingency_2x2)
+write_fixture("chi2_independence__contingency_2x2", list(
+  r_function = "stats::chisq.test (correct=TRUE default)", data = "contingency_2x2.csv",
+  statistic = unname(chi_2x2$statistic), df = unname(chi_2x2$parameter), p_value = chi_2x2$p.value
+))
+chi_3x3 <- chisq.test(contingency_3x3)
+write_fixture("chi2_independence__contingency_3x3", list(
+  r_function = "stats::chisq.test", data = "contingency_3x3.csv",
+  statistic = unname(chi_3x3$statistic), df = unname(chi_3x3$parameter), p_value = chi_3x3$p.value
+))
+
+fisher_2x2 <- fisher.test(contingency_2x2)
+write_fixture("fisher_exact__contingency_2x2", list(
+  r_function = "stats::fisher.test", data = "contingency_2x2.csv",
+  p_value = fisher_2x2$p.value,
+  odds_ratio_conditional_mle = unname(fisher_2x2$estimate),
+  ci_low = fisher_2x2$conf.int[1], ci_high = fisher_2x2$conf.int[2]
+))
+fisher_3x3 <- fisher.test(contingency_3x3)
+write_fixture("fisher_exact__contingency_3x3", list(
+  r_function = "stats::fisher.test (r x c, exact -- not simulated)", data = "contingency_3x3.csv",
+  p_value = fisher_3x3$p.value
+))
+
+gtest_2x2 <- DescTools::GTest(contingency_2x2, correct = "none")
+write_fixture("g_test__contingency_2x2", list(
+  r_function = "DescTools::GTest(correct='none', the default)", data = "contingency_2x2.csv",
+  statistic = unname(gtest_2x2$statistic), df = unname(gtest_2x2$parameter), p_value = gtest_2x2$p.value
+))
+
+# k x 2 dose-response table for Cochran-Armitage trend.
+trend_table <- matrix(c(45, 5, 38, 12, 28, 22, 15, 35), ncol = 2, byrow = TRUE,
+                       dimnames = list(dose = c("d0", "d1", "d2", "d3"), outcome = c("no", "yes")))
+write_data("trend_table", as.data.frame(as.table(trend_table)))
+ca_trend <- DescTools::CochranArmitageTest(trend_table)
+write_fixture("cochran_armitage_trend__trend_table", list(
+  r_function = "DescTools::CochranArmitageTest", data = "trend_table.csv",
+  statistic = unname(ca_trend$statistic), p_value = ca_trend$p.value
+))
+
+# Two independent binary samples for two_proportion_z (prop.test).
+n_prop <- c(80, 75)
+x_prop <- c(34, 21)
+prop_test_r <- prop.test(x_prop, n_prop, correct = TRUE)
+write_fixture("two_proportion_z__proportions_two_sample", list(
+  r_function = "stats::prop.test(correct=TRUE, the default)",
+  x1 = x_prop[1], n1 = n_prop[1], x2 = x_prop[2], n2 = n_prop[2],
+  statistic = unname(prop_test_r$statistic), df = unname(prop_test_r$parameter),
+  p_value = prop_test_r$p.value,
+  ci_low = prop_test_r$conf.int[1], ci_high = prop_test_r$conf.int[2]
+))
+
+# Paired binary 2x2 table for mcnemar.
+n_mcn <- 40
+set.seed(20260101 + 2)
+before_mcn <- rbinom(n_mcn, 1, 0.5)
+after_mcn <- ifelse(runif(n_mcn) < 0.7, before_mcn, 1 - before_mcn)
+paired_binary <- data.frame(before = before_mcn, after = after_mcn)
+write_data("paired_binary", paired_binary)
+mcn_tab <- table(paired_binary$before, paired_binary$after)
+mcn_r <- mcnemar.test(mcn_tab, correct = TRUE)
+write_fixture("mcnemar__paired_binary", list(
+  r_function = "stats::mcnemar.test(correct=TRUE, the default)", data = "paired_binary.csv",
+  table_00 = unname(mcn_tab["0", "0"]), table_01 = unname(mcn_tab["0", "1"]),
+  table_10 = unname(mcn_tab["1", "0"]), table_11 = unname(mcn_tab["1", "1"]),
+  statistic = unname(mcn_r$statistic), df = unname(mcn_r$parameter), p_value = mcn_r$p.value
+))
+
+## Correlation ----------------------------------------------------------
+
+# n=8, no ties -> Spearman computes an EXACT p-value by default in R.
+n_corr_small <- 8
+corr_small <- data.frame(x = rnorm(n_corr_small), y = NA)
+corr_small$y <- corr_small$x * 0.8 + rnorm(n_corr_small, 0, 0.6)
+write_data("correlation_small_no_ties", corr_small)
+
+pear_r <- cor.test(corr_small$x, corr_small$y, method = "pearson")
+write_fixture("pearson__correlation_small_no_ties", list(
+  r_function = "stats::cor.test(method='pearson')", data = "correlation_small_no_ties.csv",
+  estimate = unname(pear_r$estimate), statistic = unname(pear_r$statistic),
+  df = unname(pear_r$parameter), p_value = pear_r$p.value,
+  ci_low = pear_r$conf.int[1], ci_high = pear_r$conf.int[2]
+))
+spear_r <- cor.test(corr_small$x, corr_small$y, method = "spearman")
+write_fixture("spearman__correlation_small_no_ties", list(
+  r_function = "stats::cor.test(method='spearman') (exact, no ties, n<1290)",
+  data = "correlation_small_no_ties.csv",
+  estimate = unname(spear_r$estimate), statistic = unname(spear_r$statistic),
+  p_value = spear_r$p.value
+))
+
+# With ties -> Kendall falls back to the normal approximation (tau-b).
+corr_ties <- data.frame(
+  x = c(1, 2, 2, 3, 4, 4, 5, 5, 6, 7),
+  y = c(2, 1, 3, 3, 5, 4, 6, 6, 7, 9)
+)
+write_data("correlation_with_ties", corr_ties)
+kend_r <- suppressWarnings(cor.test(corr_ties$x, corr_ties$y, method = "kendall"))
+write_fixture("kendall_tau__correlation_with_ties", list(
+  r_function = "stats::cor.test(method='kendall') (tau-b, normal approx due to ties)",
+  data = "correlation_with_ties.csv",
+  estimate = unname(kend_r$estimate), statistic = unname(kend_r$statistic), p_value = kend_r$p.value
+))
+
+# Point-biserial: cor.test on a binary (0/1) x and a continuous y is
+# algebraically identical to Pearson's r -- same R function, no separate
+# fixture needed; the Python test reuses pearson's own fixture-verified
+# formula on 0/1-coded data.
+
+# Partial correlation.
+n_pcor <- 30
+set.seed(20260101 + 3)
+covar_z <- rnorm(n_pcor)
+pcor_x <- covar_z + rnorm(n_pcor, 0, 0.7)
+pcor_y <- covar_z + rnorm(n_pcor, 0, 0.7)
+partial_corr_data <- data.frame(x = pcor_x, y = pcor_y, z = covar_z)
+write_data("partial_correlation_data", partial_corr_data)
+pcor_r <- ppcor::pcor.test(partial_corr_data$x, partial_corr_data$y, partial_corr_data$z)
+write_fixture("partial_correlation__partial_correlation_data", list(
+  r_function = "ppcor::pcor.test(method='pearson', the default)",
+  data = "partial_correlation_data.csv",
+  estimate = pcor_r$estimate, statistic = pcor_r$statistic, p_value = pcor_r$p.value,
+  df_used = pcor_r$n - pcor_r$gp - 2
+))
+
+# Distance correlation: only the statistic is checked against R (the
+# permutation p-value can't match -- different RNG; see module docstring).
+dcor_stat <- energy::dcor(partial_corr_data$x, partial_corr_data$y)
+write_fixture("distance_correlation__partial_correlation_data", list(
+  r_function = "energy::dcor", data = "partial_correlation_data.csv",
+  estimate = dcor_stat
+))
+
+## Distribution / equivalence / other ----------------------------------
+
+# Anderson-Darling k-sample: widely separated groups, to actually exercise
+# scipy's [0.001, 0.25] p-value cap (unless a permutation method is used).
+n_ad <- 15
+set.seed(20260101 + 4)
+ad_g1 <- rnorm(n_ad, 0, 1)
+ad_g2 <- rnorm(n_ad, 6, 1)
+ad_g3 <- rnorm(n_ad, 12, 1)
+ad_data <- data.frame(
+  value = c(ad_g1, ad_g2, ad_g3),
+  group = rep(c("g1", "g2", "g3"), each = n_ad)
+)
+write_data("anderson_ksamp_data", ad_data)
+ad_r <- kSamples::ad.test(ad_g1, ad_g2, ad_g3)
+write_fixture("anderson_ksamp__anderson_ksamp_data", list(
+  r_function = "kSamples::ad.test (version 2, bias-corrected)", data = "anderson_ksamp_data.csv",
+  statistic_v2 = ad_r$ad[2, 1], tav2_v2 = ad_r$ad[2, 2], p_value_v2 = ad_r$ad[2, 3]
+))
+
+# TOST equivalence: raw (not standardized) bounds -- TOSTER's default
+# eqbound_type="raw".
+n_tost <- 25
+set.seed(20260101 + 5)
+tost_x <- rnorm(n_tost, 10, 2)
+tost_y <- rnorm(n_tost, 10.3, 2)
+tost_data <- data.frame(x = tost_x, y = tost_y)
+write_data("tost_equivalence_data", tost_data)
+tost_r <- TOSTER::t_TOST(tost_x, tost_y, eqb = 1.5, var.equal = TRUE)
+write_fixture("tost_equivalence__tost_equivalence_data", list(
+  r_function = "TOSTER::t_TOST(eqbound_type='raw', the default)",
+  data = "tost_equivalence_data.csv", low_bound = -1.5, high_bound = 1.5,
+  t_lower = tost_r$TOST$t[2], p_lower = tost_r$TOST$p.value[2],
+  t_upper = tost_r$TOST$t[3], p_upper = tost_r$TOST$p.value[3],
+  df = tost_r$TOST$df[2]
+))
+
+# Runs test: median-split dichotomization (randtests::runs.test's default
+# threshold), normal-approximation p-value (its default pvalue="normal").
+n_runs <- 30
+set.seed(20260101 + 6)
+runs_data <- data.frame(x = rnorm(n_runs))
+write_data("runs_test_data", runs_data)
+runs_r <- randtests::runs.test(runs_data$x, threshold = median(runs_data$x))
+write_fixture("runs_test__runs_test_data", list(
+  r_function = "randtests::runs.test(threshold=median(x), pvalue='normal', both defaults)",
+  data = "runs_test_data.csv",
+  statistic = unname(runs_r$statistic), n_runs = runs_r$parameter[["runs"]],
+  n1 = runs_r$parameter[["n1"]], n2 = runs_r$parameter[["n2"]], p_value = runs_r$p.value
 ))
 
 cat("Wrote fixtures to", out_dir, "\n")

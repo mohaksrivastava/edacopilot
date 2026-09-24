@@ -1,0 +1,1 @@
+{"r_function":"stats::chisq.test (correct=TRUE default)","data":"contingency_2x2.csv","statistic":7.919191919191919,"df":1,"p_value":0.004891311452359335}
