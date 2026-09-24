@@ -1191,6 +1191,27 @@ This records the analysis only. It stores no evaluation of the user.
 - Adjusted p-values are recomputed for the whole session (and per family) after each new test, using the active persona method or the user's session setting.
 - The result card always shows raw p, adjusted p, and the test count.
 - `session.ledger()` shows all tests with raw/adjusted p-values.
+- **Omnibus tests vs. post-hoc results**: an omnibus test (`one_way_anova`,
+  `welch_anova`, `kruskal_wallis`, `friedman`, `repeated_measures_anova`,
+  `cochran_q`, `alexander_govern`, `permutation_anova`, and their
+  Section 6.7 factorial/categorical/correlation counterparts) enters the
+  ledger as exactly **one** entry, using its own `TestResult.p_value` —
+  never one entry per implied comparison. A post-hoc procedure
+  (`tukey_hsd`, `games_howell`, `dunn_test`, `nemenyi_friedman`,
+  `conover_friedman`, `paired_posthoc`, `mcnemar_posthoc`,
+  `permutation_posthoc`) returns a `PostHocResult` whose
+  `PairwiseComparison.p_adjusted` values are adjusted **within that
+  procedure's own family only** (`PostHocResult.p_adjust_method` and
+  `len(comparisons)` name the method and family size) — they are not
+  pooled into the session-wide adjustment `session.ledger()` computes
+  across `TestResult` entries, and they do not add to the session test
+  count. Rationale: a post-hoc family's multiplicity is already handled by
+  its own procedure (Tukey's studentized range, Dunn's Holm step-down,
+  etc.); re-adjusting those already-adjusted p-values against unrelated
+  session tests would double-correct and make the family's own adjusted
+  p-values uninterpretable. The omnibus test that triggered the post-hoc
+  *does* count normally, since running the post-hoc doesn't change how
+  many session-level conclusions that omnibus result itself supports.
 
 ### 12.4 Persistence
 - `.edacopilot/<session_id>/session.json` (steps, ledger, config, branch heads) + parquet versions.
@@ -1261,6 +1282,14 @@ A JupyterLab sidebar extension (TypeScript) that talks to the same Python sessio
 ### 15.1 Reference-value tests (edacore)
 - `scripts/generate_r_fixtures.R` runs the R equivalent of every test/check/effect size on fixed datasets (built-in R datasets + seeded synthetic data) and writes JSON to `tests/fixtures/r_reference/`.
   - Examples: `t.test` (Welch/Student), `wilcox.test`, `kruskal.test`, `aov` + `TukeyHSD`, `oneway.test`, `friedman.test`, `chisq.test`, `fisher.test`, `mcnemar.test`, `cor.test` (all methods), `shapiro.test`, `car::leveneTest`, `naniar::mcar_test`, `WRS2::yuen`, `brunnermunzel::brunnermunzel.test`, `effectsize::*`, `tseries::adf.test`, `tseries::kpss.test`, `p.adjust`.
+- **Process rule**: after any edit to `generate_r_fixtures.R`, run it fully
+  and confirm via `git diff` (or an equivalent before/after byte
+  comparison) that no *existing* fixture file changed, before writing any
+  Python that reads the new fixtures. A wrong R-object reference (the
+  actual bug behind M3 part 1's and part 2a's own CI-fix rounds) either
+  crashes the script outright or, worse, silently computes against the
+  wrong data — the only way to catch the second case is diffing every
+  fixture, not just checking the script exits 0.
 - Python tests assert agreement to 1e-6 (or documented tolerance for resampling methods with fixed seeds).
 - Property-based tests (`hypothesis`): no input mutation; invariance to row order; correct handling of NaN; sensible errors on degenerate input (constant column, one group empty).
 
@@ -1379,6 +1408,29 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-25 — M3.2a.1 (tag `m3.2a.1`)
+Pre-work for M3 part 2b, no new stattests functions:
+
+- **TestLedger rule** (Section 12.3): an omnibus test enters the session
+  ledger as exactly one entry, using its own `p_value`; a post-hoc
+  procedure's `PostHocResult` is adjusted within its own family only
+  (labelled with `p_adjust_method` and `len(comparisons)`), never pooled
+  into the session-wide adjustment, and never adds to the session test
+  count. `TestLedger` itself belongs to the not-yet-built `edacopilot`
+  session layer, so "implement and test" scoped to what `edacore` is
+  responsible for right now: `tests/unit/edacore/test_ledger_rules.py`
+  locks in that every omnibus `TestResult.p_adjusted` stays unset (never
+  self-computed) and every registered post-hoc function's
+  `PostHocResult` is correctly labelled and within-family-adjusted, for
+  all omnibus/post-hoc functions built so far.
+- `PostHocResult`/`PairwiseComparison` in Section 5: already added during
+  M3 part 2a: no additional change needed, confirmed still present.
+- **Process rule** (Section 15.1 and `generate_r_fixtures.R`'s own header
+  comment): after any edit to the R fixture script, run it fully and diff
+  every existing fixture against its pre-edit state before writing any
+  Python — codifying the discipline that caught the wrong-R-object-name
+  bug twice (M3 part 1, M3 part 2a).
 
 ### 2026-09-25 — M3 part 2a (tag `m3.2a`)
 Section 6.7's k-independent-group, k-related-group, and post-hoc tests:

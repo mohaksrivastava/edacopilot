@@ -4,6 +4,13 @@
 # running this script — never typed by hand. Re-run and commit the outputs
 # whenever a new check/effect size is added or an input dataset changes.
 #
+# PROCESS RULE: after ANY edit to this file, run it fully and diff every
+# file under tests/fixtures/r_reference/ against its pre-edit state before
+# writing any Python that reads the new fixtures. Confirm no *existing*
+# fixture changed — only new ones were added. A wrong R-object reference
+# either crashes the script outright or (worse) silently computes against
+# the wrong data; diffing is the only way to catch the second case.
+#
 # Two kinds of output land in tests/fixtures/r_reference/:
 #   data/<name>.csv   the exact input data (so Python loads *this*, not a
 #                      Python-side RNG draw that merely shares a seed —
