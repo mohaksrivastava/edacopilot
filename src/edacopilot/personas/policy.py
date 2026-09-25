@@ -66,6 +66,50 @@ class VariancePolicy(BaseModel):
     strategy: Literal["always_robust"] | None = None
 
 
+ProposalTrigger = Literal["soft_assumption_not_met", "outliers_flagged"]
+
+
+class ProposalPolicy(BaseModel):
+    """When a persona offers its own method, and whom it defers to otherwise.
+
+    The Maverick is the persona this exists for. Its value is in the cases
+    where the standard choice is compromised; on data that meets every
+    assumption, an unfamiliar method is a cost its own
+    `must_state_tradeoff` constraint names ("less familiar to reviewers")
+    with no matching benefit -- and it puts a divergence card in front of
+    the user where the personas do not really disagree.
+
+    Deferring is not silence: the concurring persona still appears, with a
+    note saying it examined the data and had nothing to add.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    propose_when: list[ProposalTrigger] = Field(min_length=1)
+    otherwise_concur_with: str
+
+
+class EquivalenceRule(BaseModel):
+    """Two methods that answer the same question under a stated condition
+    (Section 8.3).
+
+    `when_passes` is mandatory by design: a rule that merged methods
+    unconditionally could hide a real disagreement. Student's t and Welch's
+    t agree only when the variances really are equal, and the check has to
+    say so before the rule applies.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    functions: frozenset[str] = Field(min_length=2)
+    when_passes: str
+    note: str
+
+    def applies_to(self, functions: set[str]) -> bool:
+        return len(functions) > 1 and functions <= self.functions
+
+
 class MultipleTestingPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -94,6 +138,7 @@ class PersonaPolicy(BaseModel):
     prefer: list[str] = Field(min_length=1)
     multiple_testing: MultipleTestingPolicy
     explanation_style: str
+    proposal_policy: ProposalPolicy | None = None
     missing: dict[str, Any] = Field(default_factory=dict)
     outliers: dict[str, Any] = Field(default_factory=dict)
     transforms: dict[str, Any] = Field(default_factory=dict)
@@ -126,6 +171,22 @@ class PersonaPolicy(BaseModel):
         return self.variance is not None and self.variance.strategy == "always_robust"
 
 
+@lru_cache(maxsize=1)
+def load_equivalences(directory: Path | None = None) -> tuple[EquivalenceRule, ...]:
+    """Practical-equivalence rules (Section 8.3), from `equivalences.yaml`.
+
+    Config rather than code so a rule can be reviewed, and added, without
+    touching the pick algorithm -- the same reason the personas themselves
+    are YAML.
+    """
+    path = (directory or PERSONA_DIR) / "equivalences.yaml"
+    if not path.exists():
+        return ()
+    with path.open(encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle) or {}
+    return tuple(EquivalenceRule.model_validate(rule) for rule in raw.get("rules", []))
+
+
 def load_policy(path: Path) -> PersonaPolicy:
     with path.open(encoding="utf-8") as handle:
         raw = yaml.safe_load(handle)
@@ -142,7 +203,11 @@ def load_personas(directory: Path | None = None) -> tuple[PersonaPolicy, ...]:
     per turn would make the pick's cost depend on how often it is called.
     """
     base = directory or PERSONA_DIR
-    policies = {path.stem: load_policy(path) for path in sorted(base.glob("*.yaml"))}
+    policies = {
+        path.stem: load_policy(path)
+        for path in sorted(base.glob("*.yaml"))
+        if path.stem != "equivalences"
+    }
 
     missing = [name for name in PERSONA_ORDER if name not in policies]
     if missing:
@@ -156,6 +221,13 @@ def load_personas(directory: Path | None = None) -> tuple[PersonaPolicy, ...]:
     for name, policy in policies.items():
         if policy.id != name:
             raise ValueError(f"{name}.yaml declares id '{policy.id}'; they must match")
+        concur = policy.proposal_policy.otherwise_concur_with if policy.proposal_policy else None
+        if concur is not None and concur not in PERSONA_ORDER:
+            raise ValueError(
+                f"{name}.yaml defers to '{concur}', which is not one of {PERSONA_ORDER}"
+            )
+        if concur == name:
+            raise ValueError(f"{name}.yaml defers to itself")
     return tuple(policies[name] for name in PERSONA_ORDER)
 
 

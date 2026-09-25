@@ -41,15 +41,15 @@ Family: `two_independent_numeric`. Card: **divergence**.
 
 > normal, equal variance, equal n -- the case where nothing is compromised
 
-Family: `two_independent_numeric`. Card: **divergence**.
+Family: `two_independent_numeric`. Card: **consensus**.
 
-> Professor → Student's t-test. Consultant → Welch's t-test. Maverick → Yuen's trimmed-mean t-test.
+> All three personas reach the same conclusion: Professor + Maverick → Student's t-test, Consultant → Welch's t-test. With equal variances confirmed, Welch's correction is negligible and the two tests give the same answer.
 
 | Persona | Pick | Status | Rationale |
 |---|---|---|---|
 | **Professor** | `student_t` | `eligible` | Student's t-test is the method whose assumptions this data actually meets; every assumption it makes is checked and holds here; though independence depends on how the data was collected, not just its values. |
 | **Consultant** | `welch_t` | `eligible` | Use Welch's t-test. |
-| **Maverick** | `yuen_trimmed_t` | `eligible` | Yuen's trimmed-mean t-test is worth a look here; it assumes less than the standard choice; though independence depends on how the data was collected, not just its values. |
+| **Maverick** | `student_t` | `eligible` | Maverick concurs with Professor on Student's t-test: every assumption these methods make is met, so an alternative would add unfamiliarity without adding information. |
 
 ### heteroscedastic_groups
 
@@ -83,29 +83,29 @@ Family: `two_independent_numeric`. Card: **divergence**.
 
 > the trap resolved: the user confirmed the repeated-measures design (Section 15.3)
 
-Family: `two_paired_numeric`. Card: **divergence**.
+Family: `two_paired_numeric`. Card: **consensus**.
 
-> Professor + Consultant → a paired t-test. Maverick → a paired permutation test.
+> All three personas agree: a paired t-test.
 
 | Persona | Pick | Status | Rationale |
 |---|---|---|---|
 | **Professor** | `paired_t` | `eligible` | A paired t-test is the method whose assumptions this data actually meets; every assumption it makes is checked and holds here. |
 | **Consultant** | `paired_t` | `eligible` | Use a paired t-test. |
-| **Maverick** | `permutation_test_paired` | `eligible` | A paired permutation test is worth a look here; it assumes less than the standard choice. |
+| **Maverick** | `paired_t` | `eligible` | Maverick concurs with Professor on a paired t-test: every assumption these methods make is met, so an alternative would add unfamiliarity without adding information. |
 
 ### ordinal_as_numeric (confirmed ordinal)
 
 > a 1-5 Likert scale, confirmed as ordinal rather than measured (Section 15.3)
 
-Family: `ordinal_any`. Card: **divergence**.
+Family: `ordinal_any`. Card: **consensus**.
 
-> Professor + Consultant → Spearman's correlation. Maverick: no method to offer.
+> All three personas agree: Spearman's correlation.
 
 | Persona | Pick | Status | Rationale |
 |---|---|---|---|
 | **Professor** | `spearman` | `eligible` | Spearman's correlation is the method whose assumptions this data actually meets; every assumption it makes is checked and holds here. |
 | **Consultant** | `spearman` | `eligible` | Use Spearman's correlation. |
-| **Maverick** | — | — | Maverick has no method to offer here: nothing in this family is both eligible and inside this persona's method pool. |
+| **Maverick** | `spearman` | `eligible` | Maverick concurs with Professor on Spearman's correlation: nothing in this family is inside this persona's method pool. |
 
 ## How to read a relaxed status
 

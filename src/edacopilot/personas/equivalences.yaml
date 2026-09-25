@@ -1,0 +1,21 @@
+# Practical-equivalence rules for divergence detection (ARCHITECTURE.md
+# Section 8.3).
+#
+# Two personas can name different methods and still be saying the same thing.
+# Showing that as a divergence card asks the user to choose between two
+# answers that are not actually different, which trains them to treat the
+# card as noise -- the opposite of what it is for. A rule here says: when
+# this condition holds, these methods are one proposal.
+#
+# A rule may only ever COLLAPSE a divergence that is not real. It can never
+# merge methods that would give materially different answers, which is why
+# each rule carries a `when_passes` condition rather than being
+# unconditional: Student's t and Welch's t agree only when the variances
+# actually are equal, and the check has to say so first.
+rules:
+  - id: student_vs_welch
+    functions: [student_t, welch_t]
+    when_passes: equal_variance
+    note: >-
+      with equal variances confirmed, Welch's correction is negligible and the
+      two tests give the same answer

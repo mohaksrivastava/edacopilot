@@ -952,6 +952,13 @@ Persona picks (Section 8): Professor → `mann_whitney` (clean assumptions, stri
 ## 8. Persona engine
 
 ### 8.1 Policy schema (`personas/*.yaml`)
+A persona's `normality.method` / `variance.method` list names the checks it
+**cites** when it explains itself; it never permits ignoring a FAIL from a
+check it does not cite — relaxation happens only through the explicitly
+named rules below (`clt_shortcut`, `borderline_is`), and a persona that
+could reach eligibility by declining to look at a check would be skipping an
+assumption silently, which is what rule 2 exists to prevent.
+
 ```yaml
 # professor.yaml
 id: professor
@@ -1012,6 +1019,9 @@ normality:
   borderline_is: fail
 method_pool_tags: [resampling, robust, nonparametric_advanced, maverick]
 prefer: [robust, resampling, informative_effect_sizes]
+proposal_policy:                       # speak up only when it adds something
+  propose_when: [soft_assumption_not_met, outliers_flagged]
+  otherwise_concur_with: professor
 multiple_testing: { default: fdr_bh, apply: always }
 missing:
   prefer: [impute_missforest, impute_knn, delta_sensitivity]
@@ -1072,6 +1082,20 @@ so the order is total and stable (rule 7). An unrecognised `prefer` key is
 a load-time error — silently skipping it would leave the persona ranking by
 something other than what its file says.
 
+**`proposal_policy` (M5.1).** A persona may decline to propose its own
+method and concur with another instead. The Maverick does: it offers an
+alternative only when at least one soft assumption is BORDERLINE/FAIL, or
+outliers are flagged for the variables involved; otherwise (and whenever
+its own pool is empty) it concurs with the Professor. The reasoning is its
+own `must_state_tradeoff` constraint — an unfamiliar method is a real cost
+("less familiar to reviewers"), and on data that meets every assumption
+there is no matching benefit, only a divergence card where the personas do
+not actually disagree. Concurring is not silence: the persona still appears
+on the card with a one-line note saying it looked and had nothing to add.
+The `outliers_flagged` trigger currently reads
+`check_influential_outliers`, the only outlier diagnostic that exists;
+Section 6.4's general detection (M11) will feed the same trigger.
+
 **The CLT shortcut is Cochran's rule** (`clt_shortcut: cochran`): the
 large-sample condition is met, per group, when `n > 25 * skew^2`. It
 replaced a pair of flat thresholds (`min_n_per_group: 30`,
@@ -1090,9 +1114,24 @@ stays visible; it simply no longer produces a caveat by itself. The
 professor keeps `clt_shortcut: none` precisely because of cases like that.
 
 ### 8.3 Divergence detection
-Two proposals are "the same" if they share `function` and materially identical `params`. Group personas by proposal:
+Two proposals are "the same" if they share `function` and materially identical `params`, **or** if a practical-equivalence rule says they answer the same question under a condition this data meets. Group personas by proposal:
 - 1 group → **Consensus card**: the method, one-line reason, the diagnostics table (collapsed), and "All three personas agree."
 - 2–3 groups → **Divergence card**: one column per distinct proposal, labelled with the persona(s), plus a comparison section.
+
+**Practical equivalence (M5.1).** Rules live in
+`personas/equivalences.yaml`, as config rather than code, for the same
+reason the personas do — a rule can be reviewed and added without touching
+the pick algorithm. The first is `student_t ≈ welch_t when equal_variance
+PASSes`. Two personas naming different methods that agree under a condition
+the data meets are **one** proposal: presenting that as a choice asks the
+user to decide between two answers that are not different, which teaches
+them to read the card as noise. The consensus card then names each
+persona's method and why the conclusion is the same.
+
+Two safeguards make this collapse-only. A rule's `when_passes` condition is
+mandatory and an *absent* check does not satisfy it — if the condition was
+never evaluated there is no evidence the methods agree. And a rule can only
+ever turn a divergence into a consensus, never the reverse.
 
 `docs/persona_picks.md` renders every trap scenario against all three
 personas, with the template rationale each would show. Like the eligibility
@@ -1541,6 +1580,43 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-25 — M5.1 (tag `m5.1`)
+Divergence cards that only appear when the personas actually disagree. A
+card the user learns to dismiss is worse than no card, because the one time
+it matters it gets dismissed too.
+
+- **Practical equivalence (Section 8.3)**, as config in
+  `personas/equivalences.yaml`. The first rule: `student_t` and `welch_t`
+  are one proposal when the `equal_variance` check PASSes. Two safeguards
+  keep it collapse-only — a rule's `when_passes` condition is mandatory and
+  an *absent* check does not satisfy it (not evaluated is not the same as
+  passed), and a rule can turn a divergence into a consensus but never the
+  reverse. The consensus card then names each persona's method and why the
+  conclusion is the same.
+- **The Maverick proposes only when it adds something** (`proposal_policy`
+  in `maverick.yaml`): at least one soft assumption BORDERLINE/FAIL, or
+  outliers flagged. Otherwise, and whenever its own pool is empty, it
+  concurs with the Professor. Its own `must_state_tradeoff` constraint is
+  the argument — an unfamiliar method costs ("less familiar to reviewers")
+  and on clean data buys nothing. Concurring is not silence: the persona
+  still appears with a one-line note saying it looked and had nothing to
+  add, which also replaces the old "no method to offer" on ordinal
+  association questions. `outliers_flagged` currently reads
+  `check_influential_outliers`, the only outlier diagnostic that exists;
+  Section 6.4's detection (M11) feeds the same trigger.
+- **Section 8.1 now says plainly** that a persona's `method` list names the
+  checks it *cites* and never permits ignoring a FAIL from a check it does
+  not cite. That was M5's reading, decided on the strength of 7.4; it is
+  now written down rather than inferred.
+- **Scenario cards after the change**: 3 consensus, 3 divergence (was 1
+  consensus, 5 divergence). `clean two groups` became a consensus by
+  equivalence (Professor → Student's t, Consultant → Welch, Maverick
+  concurring); `paired_as_independent` and `ordinal_as_numeric` became
+  consensus because the Maverick concurs instead of dissenting or going
+  silent. **Section 7.4 is unchanged**: a two-proposal divergence card,
+  with the Maverick proposing on its own because normality and variance
+  both fail there.
 
 ### 2026-09-25 — M5 (tag `m5`)
 The persona engine (Section 8), deterministic parts, in

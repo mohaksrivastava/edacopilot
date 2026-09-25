@@ -294,8 +294,13 @@ def test_each_persona_only_proposes_from_its_own_method_pool() -> None:
 
 
 def test_the_maverick_never_proposes_a_plain_parametric_test() -> None:
+    """Its own proposal, that is. Called through `propose()` on clean data
+    it concurs with the Professor instead (M5.1's `proposal_policy`, tested
+    in test_persona_equivalence.py); what this pins is that when it does
+    speak for itself, it speaks from its own pool."""
     candidates = _candidates(_clean())
     maverick = pick(get_persona("maverick"), candidates)
+    assert maverick.concurs_with is None
     assert maverick.function in {"yuen_trimmed_t", "permutation_test_2s", "bootstrap_diff"}
 
 

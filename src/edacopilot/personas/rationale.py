@@ -138,6 +138,16 @@ def render_rationale(
             f"is both eligible and inside this persona's method pool."
         )
 
+    if pick.concurs_with:
+        # A persona that defers still says why, in its own voice. Silence
+        # would read as absence; the user should know the alternative was
+        # considered and found unnecessary.
+        with_whom = get_persona(pick.concurs_with).display_name
+        return (
+            f"{policy.display_name} concurs with {with_whom} on "
+            f"{_method_name(pick.candidate.function)}: {pick.concur_note}."
+        )
+
     method = _method_name(pick.candidate.function)
     caveated = pick.eligibility is Eligibility.CAVEAT
     opener = (_CAVEAT_OPENERS if caveated else _OPENERS)[style].format(method=method)
@@ -184,12 +194,30 @@ def render_card(verdict: PersonaVerdict) -> str:
         only = verdict.proposals[0]
         if not only.function:
             return "No persona has a method to offer for this question."
+        if only.is_equivalence:
+            return (
+                f"All three personas reach the same conclusion: "
+                f"{_equivalence_line(only)}. {only.equivalence_note[0].upper()}"
+                f"{only.equivalence_note[1:]}."
+            )
         return f"All three personas agree: {_method_name(only.function)}."
     return " ".join(_proposal_line(p) for p in verdict.proposals)
 
 
+def _equivalence_line(proposal: Proposal) -> str:
+    """Name each persona's method, since they differ even though the answer
+    does not -- the user should see what was actually proposed."""
+    by_method: dict[str, list[str]] = {}
+    for persona_id, function in proposal.equivalent_methods.items():
+        by_method.setdefault(function, []).append(get_persona(persona_id).display_name)
+    return ", ".join(
+        f"{' + '.join(names)} → {_method_name(function)}" for function, names in by_method.items()
+    )
+
+
 def _proposal_line(proposal: Proposal) -> str:
-    who = " + ".join(proposal.display_names)
     if not proposal.function:
-        return f"{who}: no method to offer."
-    return f"{who} → {_method_name(proposal.function)}."
+        return f"{' + '.join(proposal.display_names)}: no method to offer."
+    if proposal.is_equivalence:
+        return f"{_equivalence_line(proposal)} ({proposal.equivalence_note})."
+    return f"{' + '.join(proposal.display_names)} → {_method_name(proposal.function)}."

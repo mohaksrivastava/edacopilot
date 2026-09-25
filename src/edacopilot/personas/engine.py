@@ -41,7 +41,7 @@ from edacopilot.eligibility.engine import CandidateSet
 from edacore.contracts import AssumptionCheck, Candidate, CheckStatus, Eligibility
 from edacore.registry import registry
 
-from .policy import PersonaPolicy, load_personas
+from .policy import EquivalenceRule, PersonaPolicy, load_equivalences, load_personas
 
 # Assumption names whose caveats the CLT shortcut is allowed to clear.
 _NORMALITY_ASSUMPTIONS = frozenset(
@@ -69,6 +69,11 @@ class PersonaPick(BaseModel):
     relaxations: list[str] = Field(default_factory=list)
     excluded: dict[str, str] = Field(default_factory=dict)
     rationale: str = ""
+    # Set when this persona deferred to another rather than proposing its
+    # own method (Section 8.1's `proposal_policy`). Deferring is not
+    # silence: the persona still appears, with this note saying so.
+    concurs_with: str | None = None
+    concur_note: str = ""
 
     @property
     def function(self) -> str | None:
@@ -85,6 +90,15 @@ class Proposal(BaseModel):
     personas: list[str]
     display_names: list[str]
     rationale: str = ""
+    # When personas named *different* methods that a Section 8.3
+    # equivalence rule collapsed into this one proposal: who named what,
+    # and why the conclusion is the same.
+    equivalent_methods: dict[str, str] = Field(default_factory=dict)
+    equivalence_note: str = ""
+
+    @property
+    def is_equivalence(self) -> bool:
+        return bool(self.equivalent_methods)
 
 
 class PersonaVerdict(BaseModel):
@@ -237,12 +251,21 @@ PREFERENCE_KEYS: dict[str, PreferenceFn] = {
 # --------------------------------------------------------------------------
 
 
-def pick(policy: PersonaPolicy, candidates: CandidateSet) -> PersonaPick:
+def pick(
+    policy: PersonaPolicy,
+    candidates: CandidateSet,
+    already: dict[str, PersonaPick] | None = None,
+) -> PersonaPick:
     """Section 8.2's algorithm, with every exclusion recorded.
 
-    Returns a pick with `candidate=None` when the persona's method pool is
-    empty for this family -- which is a real answer ("I have nothing to
-    offer here"), not an error, and is what the divergence card shows.
+    `already` holds the picks of personas resolved earlier in
+    `PERSONA_ORDER`, which a `proposal_policy` needs in order to defer to
+    one of them. Absent it, a persona that would have deferred simply
+    proposes its own method -- so `pick` stays usable on its own.
+
+    A pick with `candidate=None` means the persona's method pool is empty
+    for this family and it has nobody to defer to. That is a real answer
+    ("I have nothing to offer here"), not an error.
     """
     checks = {check.fact_id: check for check in candidates.checks}
     excluded: dict[str, str] = {}
@@ -266,9 +289,16 @@ def pick(policy: PersonaPolicy, candidates: CandidateSet) -> PersonaPick:
         pool.append(_reclassify(policy, candidate, checks))
 
     if not pool:
-        return PersonaPick(
+        empty = PersonaPick(
             persona=policy.id, display_name=policy.display_name, candidate=None, excluded=excluded
         )
+        deferred = _maybe_defer(
+            policy,
+            candidates,
+            already or {},
+            reason="nothing in this family is inside this persona's method pool",
+        )
+        return deferred.model_copy(update={"excluded": excluded}) if deferred else empty
 
     eligible = [item for item in pool if item.eligibility is Eligibility.ELIGIBLE]
     if not eligible:
@@ -277,13 +307,90 @@ def pick(policy: PersonaPolicy, candidates: CandidateSet) -> PersonaPick:
         eligible = [item for item in pool if item.n_caveats == fewest]
 
     chosen = min(eligible, key=lambda item: _sort_key(policy, item, candidates))
-    return PersonaPick(
+    own = PersonaPick(
         persona=policy.id,
         display_name=policy.display_name,
         candidate=chosen.candidate,
         eligibility=chosen.eligibility,
         relaxations=[chosen.relaxation] if chosen.relaxation else [],
         excluded=excluded,
+    )
+    deferred = _maybe_defer(policy, candidates, already or {}, reason=None)
+    return deferred or own
+
+
+def _has_unmet_soft_assumption(candidates: CandidateSet) -> bool:
+    """Is anything the family depends on less than clean?
+
+    Read across the whole candidate set, not one method: the Maverick's
+    value is in noticing that *this data* is awkward, which is a property
+    of the data rather than of whichever method happens to be ranked first.
+    """
+    soft_names = {
+        name
+        for candidate in candidates.candidates
+        for name in registry.get(candidate.function).assumptions.soft
+    }
+    return any(
+        check.assumption in soft_names
+        and check.status in (CheckStatus.FAIL, CheckStatus.BORDERLINE)
+        for check in candidates.checks
+    )
+
+
+def _has_flagged_outliers(candidates: CandidateSet) -> bool:
+    """Are outliers flagged for the variables in play?
+
+    For now this reads `check_influential_outliers`, the only outlier
+    diagnostic that exists (M4 added it for Pearson). General outlier
+    detection is Section 6.4, which lands in M11; when it does, its flags
+    feed this same trigger and nothing else here has to change.
+    """
+    return any(
+        check.assumption == "no_influential_outliers"
+        and check.status in (CheckStatus.FAIL, CheckStatus.BORDERLINE)
+        for check in candidates.checks
+    )
+
+
+_TRIGGERS = {
+    "soft_assumption_not_met": _has_unmet_soft_assumption,
+    "outliers_flagged": _has_flagged_outliers,
+}
+
+
+def _maybe_defer(
+    policy: PersonaPolicy,
+    candidates: CandidateSet,
+    already: dict[str, PersonaPick],
+    reason: str | None,
+) -> PersonaPick | None:
+    """Apply `proposal_policy`: concur with another persona instead of
+    proposing, when nothing about this data calls for an alternative."""
+    proposal_policy = policy.proposal_policy
+    if proposal_policy is None:
+        return None
+    if reason is None and any(
+        _TRIGGERS[trigger](candidates) for trigger in proposal_policy.propose_when
+    ):
+        return None
+
+    target = already.get(proposal_policy.otherwise_concur_with)
+    if target is None or target.candidate is None:
+        return None
+
+    note = (
+        reason
+        or "every assumption these methods make is met, so an alternative would "
+        "add unfamiliarity without adding information"
+    )
+    return PersonaPick(
+        persona=policy.id,
+        display_name=policy.display_name,
+        candidate=target.candidate,
+        eligibility=target.eligibility,
+        concurs_with=target.persona,
+        concur_note=note,
     )
 
 
@@ -320,8 +427,56 @@ def _same_proposal(a: PersonaPick, b: PersonaPick) -> bool:
     return a.candidate.function == b.candidate.function and a.candidate.params == b.candidate.params
 
 
-def detect_divergence(picks: Sequence[PersonaPick]) -> PersonaVerdict:
-    """Group picks into distinct proposals, preserving persona order."""
+def _satisfied(rule: EquivalenceRule, checks: Sequence[AssumptionCheck]) -> bool:
+    """A rule applies only when its named check actually PASSes.
+
+    An absent check is not a pass: if the condition was never evaluated,
+    there is no evidence the two methods agree, and merging them would
+    hide a difference rather than reveal there is none.
+    """
+    relevant = [c for c in checks if c.assumption == rule.when_passes]
+    return bool(relevant) and all(c.status is CheckStatus.PASS for c in relevant)
+
+
+def _merge_equivalent(
+    groups: list[list[PersonaPick]], checks: Sequence[AssumptionCheck]
+) -> tuple[list[list[PersonaPick]], dict[int, EquivalenceRule]]:
+    """Collapse groups whose methods a Section 8.3 rule makes equivalent.
+
+    Only ever collapses: a rule can turn a divergence into a consensus, and
+    never the reverse.
+    """
+    rules = [rule for rule in load_equivalences() if _satisfied(rule, checks)]
+    if not rules or len(groups) < 2:
+        return groups, {}
+
+    merged: list[list[PersonaPick]] = []
+    applied: dict[int, EquivalenceRule] = {}
+    for group in groups:
+        functions = {p.candidate.function for p in group if p.candidate}
+        for index, existing in enumerate(merged):
+            existing_functions = {p.candidate.function for p in existing if p.candidate}
+            rule = next((r for r in rules if r.applies_to(existing_functions | functions)), None)
+            if rule is not None:
+                merged[index] = [*existing, *group]
+                applied[index] = rule
+                break
+        else:
+            merged.append(list(group))
+    return merged, applied
+
+
+def detect_divergence(
+    picks: Sequence[PersonaPick], checks: Sequence[AssumptionCheck] = ()
+) -> PersonaVerdict:
+    """Group picks into distinct proposals, preserving persona order.
+
+    Two personas naming different methods that answer the same question
+    under a condition the data meets are one proposal, not two (Section
+    8.3's practical equivalence). Presenting that as a choice would ask the
+    user to decide between two answers that are not different, which
+    teaches them to read the card as noise.
+    """
     groups: list[list[PersonaPick]] = []
     for item in picks:
         for group in groups:
@@ -331,18 +486,35 @@ def detect_divergence(picks: Sequence[PersonaPick]) -> PersonaVerdict:
         else:
             groups.append([item])
 
-    proposals = [
-        Proposal(
-            function=group[0].candidate.function if group[0].candidate else "",
-            params=dict(group[0].candidate.params) if group[0].candidate else {},
-            personas=[p.persona for p in group],
-            display_names=[p.display_name for p in group],
+    groups, applied = _merge_equivalent(groups, checks)
+
+    proposals = []
+    for index, group in enumerate(groups):
+        rule = applied.get(index)
+        methods = {p.persona: p.candidate.function for p in group if p.candidate}
+        distinct = len(set(methods.values())) > 1
+        proposals.append(
+            Proposal(
+                function=group[0].candidate.function if group[0].candidate else "",
+                params=dict(group[0].candidate.params) if group[0].candidate else {},
+                personas=[p.persona for p in group],
+                display_names=[p.display_name for p in group],
+                equivalent_methods=methods if (rule and distinct) else {},
+                equivalence_note=rule.note if (rule and distinct) else "",
+            )
         )
-        for group in groups
-    ]
     return PersonaVerdict(picks=list(picks), proposals=proposals)
 
 
 def propose(candidates: CandidateSet) -> PersonaVerdict:
-    """Every persona's pick for this candidate set, grouped (8.2 + 8.3)."""
-    return detect_divergence([pick(policy, candidates) for policy in load_personas()])
+    """Every persona's pick for this candidate set, grouped (8.2 + 8.3).
+
+    Personas resolve in `PERSONA_ORDER`, so a persona whose
+    `proposal_policy` defers to another always has that other pick
+    available. The order is fixed, which also keeps the result stable
+    (rule 7).
+    """
+    picks: dict[str, PersonaPick] = {}
+    for policy in load_personas():
+        picks[policy.id] = pick(policy, candidates, already=picks)
+    return detect_divergence(list(picks.values()), candidates.checks)

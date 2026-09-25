@@ -9,6 +9,14 @@ normality:
   clt_shortcut: none
 method_pool_tags: [resampling, robust, nonparametric_advanced, maverick]
 prefer: [robust, resampling, informative_effect_sizes]
+# The Maverick speaks up when there is something to be gained by it, and
+# otherwise gets out of the way. Offering an unfamiliar method on data that
+# meets every assumption is a cost (see `must_state_tradeoff` below: "less
+# familiar to reviewers") with no matching benefit, and it puts a divergence
+# card in front of the user where the personas do not really disagree.
+proposal_policy:
+  propose_when: [soft_assumption_not_met, outliers_flagged]
+  otherwise_concur_with: professor
 multiple_testing: { default: fdr_bh, apply: always }
 missing:
   prefer: [impute_missforest, impute_knn, delta_sensitivity]
