@@ -1,0 +1,1 @@
+{"r_function":"stats::chisq.test(x, p=)$expected","data":"category_counts.csv","expected_probs":[0.2,0.3,0.3,0.2],"expected_counts":[17,25.5,25.5,17],"min_expected":17,"pct_below_5":0}

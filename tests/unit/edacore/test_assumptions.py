@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 import edacore
 from edacore.contracts import CheckStatus, SemanticType
@@ -315,15 +316,39 @@ def test_check_linearity_matches_r_reset() -> None:
     )
 
 
-def test_check_monotonicity_matches_r() -> None:
+def test_check_monotonicity_passes_on_monotonic_data() -> None:
+    """The regression this exists for: until M4 this check took Spearman's
+    own p-value as its verdict, so a *strong* monotone association (tiny p)
+    was reported as FAILING monotonicity. The M2 test compared only rho and
+    p against R and never asserted a status, which is how the inversion
+    survived -- so this asserts the status first.
+
+    `monotonic_xy` is y = log(x) + noise: monotone, not linear, which is
+    exactly the shape Spearman is for. The R fixture's Spearman rho is
+    still checked, against the function that actually reports it.
+    """
     df = _data("monotonic_xy")
-    ref = _ref("check_monotonicity__monotonic_xy")
     check = edacore.assumptions.check_monotonicity(df, "x", "y")
-    _close(check.statistic, ref["rho"])
-    _close(check.p_value, ref["p_value"])
+    assert check.status is CheckStatus.PASS
+    assert check.statistic == pytest.approx(0.0, abs=0.05)
+
+    ref = _ref("check_monotonicity__monotonic_xy")
+    spearman = edacore.stattests.correlation.spearman(df, "x", "y")
+    _close(spearman.estimate, ref["rho"])
+
     assert_codegen_matches(
         registry, "check_monotonicity", {"x": "x", "y": "y"}, df, namespace=_NAMESPACE
     )
+
+
+def test_check_monotonicity_fails_on_a_u_shape() -> None:
+    """A U shape is a strong, perfectly ordered relationship that Spearman's
+    rho reports as roughly zero. That is the case the check has to catch."""
+    x = np.linspace(-10, 10, 120)
+    df = pd.DataFrame({"x": x, "y": x**2})
+    check = edacore.assumptions.check_monotonicity(df, "x", "y")
+    assert check.status is CheckStatus.FAIL
+    assert abs(stats.spearmanr(df["x"], df["y"]).statistic) < 0.1
 
 
 def test_check_homoscedasticity_bp_matches_r() -> None:
@@ -396,10 +421,35 @@ def test_check_same_shape_matches_r() -> None:
     )
 
 
-def test_check_same_shape_requires_exactly_two_groups() -> None:
+def test_check_same_shape_handles_more_than_two_groups() -> None:
+    """Kruskal-Wallis declares `same_shape` too, so the check cannot be
+    two-group-only. With k > 2 it compares every pair and Holm-adjusts, so
+    the reported p-value is the worst pair's ADJUSTED one -- never the raw
+    minimum, which over C(k,2) pairs would reject on chance alone and hand
+    the user a caveat that means nothing."""
     df = _data("three_groups")
-    with pytest.raises(ValueError, match="exactly 2 groups"):
-        edacore.assumptions.check_same_shape(df, "value", "group")
+    check = edacore.assumptions.check_same_shape(df, "value", "group")
+    assert check.status is CheckStatus.PASS
+    assert "3 pairs" in check.threshold and "Holm" in check.threshold
+
+
+def test_check_same_shape_needs_at_least_two_groups() -> None:
+    df = _data("three_groups")
+    with pytest.raises(ValueError, match="at least 2 groups"):
+        edacore.assumptions.check_same_shape(df[df["group"] == "A"], "value", "group")
+
+
+def test_check_same_shape_detects_a_differently_shaped_group() -> None:
+    rng = np.random.default_rng(77)
+    df = pd.DataFrame(
+        {
+            "value": np.concatenate(
+                [rng.normal(0, 1, 200), rng.normal(0, 1, 200), rng.exponential(1, 200)]
+            ),
+            "group": ["a"] * 200 + ["b"] * 200 + ["c"] * 200,
+        }
+    )
+    assert edacore.assumptions.check_same_shape(df, "value", "group").status is CheckStatus.FAIL
 
 
 # --------------------------------------------------------------------------
@@ -473,6 +523,12 @@ def test_all_hypothesis_stage_check_functions_are_registered() -> None:
         if spec.name.startswith("check_") or spec.name == "qq_correlation"
     }
     assert names == {
+        "check_balanced_design",
+        "check_design_crossing",
+        "check_expected_counts_gof",
+        "check_influential_outliers",
+        "check_proportion_counts",
+        "check_symmetry",
         "check_normality_shapiro",
         "check_normality_dagostino",
         "check_normality_anderson",
@@ -497,3 +553,164 @@ def test_all_hypothesis_stage_check_functions_are_registered() -> None:
         "check_measurement_level",
         "check_same_shape",
     }
+
+
+# --------------------------------------------------------------------------
+# M4 additions (Section 6.6 gap-closing for the eligibility engine)
+# --------------------------------------------------------------------------
+
+
+def test_check_symmetry_matches_r_skewness() -> None:
+    df = _data("paired_before_after").assign(d=lambda f: f["after"] - f["before"])
+    ref = _ref("check_symmetry__paired_before_after")
+    check = edacore.assumptions.check_symmetry(df, "d")[0]
+    _close(check.statistic, ref["skewness"])
+    assert check.status is CheckStatus.PASS
+
+    skewed = _data("skewed_sample")
+    ref_skewed = _ref("check_symmetry__skewed_sample")
+    skewed_check = edacore.assumptions.check_symmetry(skewed, "x")[0]
+    _close(skewed_check.statistic, ref_skewed["skewness"])
+    assert skewed_check.status is CheckStatus.FAIL
+
+    assert_codegen_matches(
+        registry, "check_symmetry", {"col": "d", "by": None}, df, namespace=_NAMESPACE
+    )
+
+
+def test_check_influential_outliers_matches_r_cooks_distance() -> None:
+    """Both branches: a normal regression, and the same data with one
+    planted high-leverage point."""
+    df = _data("regression_xy")
+    ref = _ref("check_influential_outliers__regression_xy")
+    check = edacore.assumptions.check_influential_outliers(df, "x", "y")
+    _close(check.statistic, ref["max_cooks_d"])
+    assert check.status is CheckStatus.PASS
+
+    influential = _data("regression_xy_influential")
+    ref_influential = _ref("check_influential_outliers__regression_xy_influential")
+    influential_check = edacore.assumptions.check_influential_outliers(influential, "x", "y")
+    assert influential_check.statistic == pytest.approx(ref_influential["max_cooks_d"], rel=1e-9)
+    assert influential_check.status is CheckStatus.FAIL
+
+    assert_codegen_matches(
+        registry, "check_influential_outliers", {"x": "x", "y": "y"}, df, namespace=_NAMESPACE
+    )
+
+
+def test_check_influential_outliers_does_not_use_the_4_over_n_screen_as_a_verdict() -> None:
+    """4/n flags individual points to LOOK at; at any real n some point
+    exceeds it by chance. Using it as the dataset's verdict would make
+    almost every correlation a caveat and train the user to ignore it."""
+    df = _data("regression_xy")
+    check = edacore.assumptions.check_influential_outliers(df, "x", "y")
+    ref = _ref("check_influential_outliers__regression_xy")
+    assert check.statistic > ref["threshold_4_over_n"]
+    assert check.status is CheckStatus.PASS
+
+
+def test_check_balanced_design_matches_the_r_cell_counts() -> None:
+    df = _data("repeated_measures_long")
+    ref = _ref("check_balanced_design__repeated_measures")
+    check = edacore.assumptions.check_balanced_design(df, "subject", "condition")
+    assert check.statistic == ref["min_cell"] == ref["max_cell"] == 1
+    assert check.status is CheckStatus.PASS
+
+    assert (
+        edacore.assumptions.check_balanced_design(
+            df.drop(df.index[-1]), "subject", "condition"
+        ).status
+        is CheckStatus.FAIL
+    )
+
+    assert_codegen_matches(
+        registry,
+        "check_balanced_design",
+        {"subject": "subject", "within": "condition"},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_check_proportion_counts_matches_r() -> None:
+    ref = _ref("check_proportion_counts__proportions_two_sample")
+    df = pd.DataFrame(
+        {
+            "g": ["a"] * ref["n1"] + ["b"] * ref["n2"],
+            "o": [1] * ref["x1"]
+            + [0] * (ref["n1"] - ref["x1"])
+            + [1] * ref["x2"]
+            + [0] * (ref["n2"] - ref["x2"]),
+        }
+    )
+    check = edacore.assumptions.check_proportion_counts(df, "o", "g", 1)
+    assert check.statistic == ref["min_successes_or_failures"]
+    assert check.status is CheckStatus.PASS
+
+    rare = pd.DataFrame(
+        {"g": ["a"] * 50 + ["b"] * 50, "o": [1] * 3 + [0] * 47 + [1] * 5 + [0] * 45}
+    )
+    assert edacore.assumptions.check_proportion_counts(rare, "o", "g", 1).status is CheckStatus.FAIL
+
+    assert_codegen_matches(
+        registry,
+        "check_proportion_counts",
+        {"outcome": "o", "group": "g", "event": 1},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_check_expected_counts_gof_matches_r() -> None:
+    counts = _data("category_counts")
+    ref = _ref("check_expected_counts_gof__category_counts")
+    df = pd.DataFrame({"category": counts["category"].repeat(counts["count"]).to_numpy()})
+    expected = dict(zip("ABCD", ref["expected_probs"], strict=True))
+    check = edacore.assumptions.check_expected_counts_gof(df, "category", expected)
+    _close(check.statistic, ref["min_expected"])
+    assert check.status is CheckStatus.PASS
+
+    sparse = pd.DataFrame({"category": list("ABCD") + ["A"] * 4})
+    assert (
+        edacore.assumptions.check_expected_counts_gof(sparse, "category", expected).status
+        is CheckStatus.FAIL
+    )
+
+    assert_codegen_matches(
+        registry,
+        "check_expected_counts_gof",
+        {"col": "category", "expected": expected},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_check_design_crossing_distinguishes_pairing_from_clustering() -> None:
+    """The distinction Section 7.1 rests on: an id under several groups
+    means the design is related; an id repeated inside one group means the
+    rows are clustered, which is a different problem with a different fix."""
+    independent = pd.DataFrame({"id": range(6), "g": ["a"] * 3 + ["b"] * 3})
+    crossing = pd.DataFrame({"id": list(range(3)) * 2, "g": ["a"] * 3 + ["b"] * 3})
+    clustered = pd.DataFrame({"id": [1, 1, 2, 3, 4, 5], "g": ["a"] * 3 + ["b"] * 3})
+
+    assert (
+        edacore.assumptions.check_design_crossing(independent, "g", "id").status is CheckStatus.PASS
+    )
+
+    crossed = edacore.assumptions.check_design_crossing(crossing, "g", "id")
+    assert crossed.status is CheckStatus.FAIL
+    assert crossed.statistic == 3
+    assert "more than one" in crossed.threshold
+
+    clustered_check = edacore.assumptions.check_design_crossing(clustered, "g", "id")
+    assert clustered_check.status is CheckStatus.FAIL
+    assert clustered_check.statistic == 0
+    assert "within a single group" in clustered_check.threshold
+
+    assert_codegen_matches(
+        registry,
+        "check_design_crossing",
+        {"group": "g", "id_col": "id"},
+        crossing,
+        namespace=_NAMESPACE,
+    )

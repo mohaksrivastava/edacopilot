@@ -84,7 +84,10 @@ def _clean_wide(
     kind="test",
     stage="hypothesis",
     tags={"parametric", "k_related"},
-    assumptions={"hard": ["balanced", "numeric_outcome"], "soft": ["normality", "sphericity"]},
+    assumptions={
+        "hard": ["balanced", "numeric_outcome", "repeated"],
+        "soft": ["normality", "sphericity"],
+    },
     estimand="mean of the outcome across k related (within-subject) conditions",
     code_template=(
         "edacore.stattests.k_related.repeated_measures_anova("
@@ -170,7 +173,7 @@ def repeated_measures_anova(
     kind="test",
     stage="hypothesis",
     tags={"nonparametric", "k_related"},
-    assumptions={"hard": ["ordinal_or_higher"], "soft": []},
+    assumptions={"hard": ["ordinal_or_higher", "repeated"], "soft": []},
     estimand="stochastic dominance across k related (within-subject) conditions",
     code_template=(
         "edacore.stattests.k_related.friedman("
@@ -211,7 +214,7 @@ def friedman(
     kind="test",
     stage="hypothesis",
     tags={"nonparametric", "k_related"},
-    assumptions={"hard": ["binary_outcome"], "soft": []},
+    assumptions={"hard": ["binary_outcome", "repeated"], "soft": []},
     estimand="proportion of successes across k related (within-subject) binary conditions",
     code_template=(
         "edacore.stattests.k_related.cochran_q("

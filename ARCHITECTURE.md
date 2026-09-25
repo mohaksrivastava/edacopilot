@@ -612,7 +612,20 @@ Every check returns an `AssumptionCheck` with `status` and a one-sentence `conse
 | `check_autocorrelation_dw(resid)` / `check_ljung_box(col, lags)` | Independence over time | | Time-ordered data |
 | `check_multicollinearity_vif(cols)` | Multicollinearity | VIF > 5 BORDERLINE, > 10 FAIL | |
 | `check_measurement_level(col, required)` | Scale | semantic type matches method | Hard (e.g. ordinal → no Pearson) |
-| `check_same_shape(col, group)` | Same distribution shape | KS on centred/scaled groups | Needed to read Mann–Whitney as a median test |
+| `check_same_shape(col, group)` | Same distribution shape | KS on centred/scaled groups; k>2 → all pairs, Holm-adjusted | Needed to read Mann–Whitney (or Kruskal–Wallis) as a median test |
+
+Added in M4, because Section 7's eligibility engine has to resolve *every*
+hard/soft assumption name the Section 6.7 registry uses, and these five were
+named without a check behind them:
+
+| Function | Assumption | Default rule | Note |
+|---|---|---|---|
+| `check_design_crossing(group, id_col)` | Independence / pairing | any id under >1 group level → FAIL (related design); ids repeating inside one level → FAIL (clustered) | The long-format counterpart of `check_paired_structure`. Distinguishing the two failures matters: one means "use a paired method", the other means "these rows are clustered" |
+| `check_symmetry(col, by=None)` | Symmetry | \|skew\| < 0.5 → PASS; < 1 → BORDERLINE | What the Wilcoxon tests actually assume; normality is sufficient but far stronger |
+| `check_influential_outliers(x, y)` | No influential outliers | max Cook's D > 1 → FAIL; > 0.5 → BORDERLINE | Influence, not outlyingness. General outlier detection is 6.4 (M11) |
+| `check_balanced_design(subject, within)` | Balance | every subject × condition cell holds exactly 1 row | Hard for `repeated_measures_anova` |
+| `check_proportion_counts(outcome, group, event)` | Normal approximation for proportions | ≥ 10 successes **and** ≥ 10 failures per group | Hard for `two_proportion_z` (Section 6.7 lists n·p ≥ 10 under Hard) |
+| `check_expected_counts_gof(col, expected)` | χ² validity | as `check_expected_counts`, from reference proportions | Hard for `chi2_goodness_of_fit`, which has no two-way table |
 
 ### 6.7 Hypothesis tests (`stattests/`) — stage `hypothesis`
 All return `TestResult` including effect size with CI (bootstrap if no analytic CI).
@@ -808,11 +821,27 @@ class QuestionSpec(BaseModel):
     user_text: str                            # original wording, for provenance
     confirmed_by_user: set[str] = set()       # fields the user explicitly confirmed
     ambiguities: list[str] = []               # questions to ask before proceeding
+    # Added in M4, alongside equivalence_bounds, which plays the same role
+    # for EQUIVALENCE: a DISTRIBUTION_FIT question is asked *against* a
+    # reference, and every method in that goal's families needs it
+    # (one_sample_t's mu0, binomial_test's p0, chi2_goodness_of_fit's
+    # expected proportions). Without them those candidates can never be
+    # built, so the spec has nowhere to put the question's own parameters.
+    reference_value: float | None = None
+    reference_proportions: dict[str, float] | None = None
 ```
+
+Implemented in `edacopilot/eligibility/spec.py`. `validate_spec(spec, df)`
+returns a copy carrying `ambiguities`; `select_candidates` raises
+`AmbiguousSpecError` if any remain, so step 3 below is enforced rather than
+merely expected of the orchestrator. Problems the user cannot resolve by
+answering a question — a column that does not exist, a missing required
+role, a grouping column with one level — raise `InvalidSpecError` instead:
+those are spec-building bugs, not questions.
 
 **Validation (deterministic, before any test):**
 1. All named columns exist; types match the goal (e.g. `COMPARE_GROUPS` needs a grouping column with 2+ levels).
-2. `design` is cross-checked with `check_paired_structure` and `detect_structure`. If the LLM said INDEPENDENT but IDs repeat across groups → add ambiguity: "Each customer appears in both groups — are these paired measurements?" **Design is always confirmed by the user** before a test runs; it is the single most consequential choice.
+2. `design` is cross-checked with `check_design_crossing` (M4's long-format counterpart of `check_paired_structure`, which answers the same question for wide data) and `detect_structure`. If the LLM said INDEPENDENT but IDs repeat across groups → add ambiguity: "Each customer appears in both groups — are these paired measurements?" **Design is always confirmed by the user** before a test runs; it is the single most consequential choice. The engine never edits `spec.design` itself, in either direction: the mirror-image error (design says paired, but no id appears in both groups) is also a question, and so is the third case M4 added, ids repeating *within* a single group, which means the rows are clustered rather than paired.
 3. If `ambiguities` is non-empty, the orchestrator asks the user and does not proceed.
 
 ### 7.2 Engine algorithm
@@ -830,7 +859,33 @@ def select_candidates(spec, session) -> CandidateSet:
         candidates.append(Candidate(fn, status, reasons=[fact_ids]))
     return CandidateSet(spec, checks, rank(candidates))
 ```
-Ranking within a status: fewer caveats first, then broader validity (tag `robust`), then interpretability.
+Ranking within a status: fewer caveats first, then broader validity (tag `robust`), then interpretability. The function name is the final tie-break, so the order is total and stable across runs (rule 7).
+
+Implemented in `edacopilot/eligibility/engine.py`, with the assumption-name →
+check translation in `eligibility/checks.py`. Four points that the pseudocode
+leaves implicit and M4 had to settle:
+
+- **UNTESTABLE never blocks.** Independence of sampling, exchangeability and
+  the meaningfulness of row order are facts about data collection, not
+  values (Section 5.2). They are attached as `reasons` to every candidate
+  that rests on them — including ELIGIBLE ones — and left for the user.
+- **Evidence is not the verdict.** A resolver returns *graded* checks (which
+  decide the assumption) separately from *evidence* (shown, never graded).
+  `check_design_crossing` FAILing means "these rows are not independent",
+  which is fatal to an independent-samples test and is exactly what a paired
+  test requires; grading it directly made every paired test ineligible on
+  paired data.
+- **Only a hard FAIL makes a method INELIGIBLE**, as written — a hard
+  BORDERLINE would be silently ignored. Hard assumptions are type, design and
+  count checks with no borderline band, and a test asserts that stays true.
+- **Missing question parameters are not ineligibility.** A method whose
+  params cannot be built (no equivalence bounds, no reference value, no
+  covariate) is reported under `CandidateSet.unavailable` with the reason.
+  That is a question to ask, not a verdict about the data.
+
+A family may also declare a `prepare` hook that derives a column its
+assumptions are about: a factorial design's homoscedasticity assumption is
+about its *cells* (factor A × factor B), not about either factor's margin.
 
 ### 7.3 Method families (v1)
 | Family | Trigger | Methods considered |
@@ -851,6 +906,18 @@ Ranking within a status: fewer caveats first, then broader validity (tag `robust
 | `binary_numeric` | ASSOCIATION | point_biserial (≡ t-test), mann_whitney |
 | `equivalence_two_groups` | EQUIVALENCE | tost_equivalence |
 | `ts_stationarity` | TREND | stationarity_verdict, stl_decompose, change points |
+
+`docs/eligibility_table.md` renders this table as implemented — every method
+with its hard and soft assumptions and the check that decides each one. It is
+generated from the live registry by `scripts/generate_eligibility_table.py`,
+and a test fails if the committed file and a fresh render disagree, so an
+assumption cannot change without the table changing with it.
+
+`ts_stationarity`'s methods are Section 6.9, which lands in M12. Asking a
+TREND question raises `UnsupportedQuestionError` naming the milestone rather
+than reporting those methods as INELIGIBLE: they are not ineligible, they do
+not exist yet. The same applies to DESCRIBE, MISSINGNESS, OUTLIERS and
+TRANSFORM.
 
 ### 7.4 Worked example (two independent groups)
 Data: `income` by `gender`, n = 38 and 41, strong right skew.
@@ -1420,6 +1487,105 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-25 — M4 (tag `m4`)
+The deterministic eligibility engine (Section 7), in
+`edacopilot/eligibility/`. First real code in the agent layer; still no LLM
+anywhere in it, which is what makes rule 2 ("no persona can propose an
+ineligible method") enforceable at all. Deliverable for review:
+`docs/eligibility_table.md`.
+
+- **The design cross-check is the whole point, so it never decides.**
+  `validate_spec` compares the design the question was read as against the
+  subject ids, and every branch it cannot settle becomes a question in the
+  user's own words — including the mirror-image error (design says paired,
+  but no id appears in both groups) and the case where the id column was
+  never named and `detect_structure` found it (the question says so).
+  `select_candidates` raises `AmbiguousSpecError` on a spec that still has
+  ambiguities, so Section 7.1 step 3 is enforced, not merely expected of
+  the orchestrator. `spec.design` comes back exactly as it went in.
+- **Ids repeating *within* one group is clustering, not pairing**, and the
+  new `check_design_crossing` reports the two differently. Conflating them
+  would push the user toward a paired test that has no pairs to work with.
+- **The registry's assumption metadata did not match Section 6.7's tables**,
+  and since the engine is driven by that metadata, every gap was an engine
+  bug waiting to happen. Reconciled: `independent` added to the 8 two-sample
+  and 9 k-sample/categorical methods that need it, `paired`/`repeated` to
+  the 7 related-samples ones, `min_n_per_group>=2` to `student_t`,
+  `same_shape` to `mann_whitney`, `exchangeability` to `permutation_test_2s`.
+  Two changes that alter behaviour and are worth your eye: `ks_two_sample`'s
+  outcome assumption is now `continuous` (Section 6.7's Hard column) rather
+  than `numeric_or_ordinal`, and `two_proportion_z`'s n·p ≥ 10 moved from
+  soft to hard, also per that column — so both are now INELIGIBLE rather
+  than caveated on data they do not fit.
+- **Five Section 6.6 checks were named by Section 6.7 but did not exist**:
+  `check_design_crossing`, `check_symmetry`, `check_influential_outliers`,
+  `check_balanced_design`, `check_proportion_counts`, plus
+  `check_expected_counts_gof` (the hard assumption `chi2_goodness_of_fit`
+  declares had no one-sample check behind it, so it could never block).
+  Each is verified against R where R has an equivalent.
+- **`check_monotonicity` was backwards** — a pre-existing M2 bug the engine
+  exposed. It took Spearman's own p-value as its verdict, so a *small* p (a
+  strong monotone association) was reported as FAILING monotonicity: the
+  most perfectly monotone data possible got the caveat. The M2 test compared
+  only rho and p against R and never asserted a status, which is how it
+  survived. It now measures what Section 6.6 always said ("Spearman vs
+  lowess shape"): the fraction of the lowess smooth's movement that reverses
+  direction. A U shape — strong, perfectly ordered, Spearman rho ≈ 0 — now
+  FAILs, which is the case the check exists for.
+- **`check_influential_outliers` uses 1.0 / 0.5, not 4/n.** The 4/n rule
+  screens which individual points to look at; at any real n some point
+  exceeds it by chance, so as a verdict on the dataset it made nearly every
+  correlation a caveat — which trains the user to ignore the warning.
+- **`check_same_shape` now handles k > 2 groups** (Kruskal-Wallis declares
+  it too, and the old code raised). Every pair, Holm-adjusted, worst pair
+  decides. Holm rather than the raw minimum: over C(k,2) pairs an unadjusted
+  minimum rejects on chance alone. At k=2 Holm is the identity, so two-group
+  behaviour and its fixture are unchanged.
+- **Evidence vs verdict.** A resolver returns graded checks separately from
+  evidence. `check_design_crossing` FAILing is fatal to an
+  independent-samples test and is precisely what a paired test needs; the
+  first version graded it directly and made every paired test INELIGIBLE on
+  paired data. The same split lets the CLT escape in `normality_or_large_n`
+  actually replace the Shapiro failure it exists to excuse, rather than
+  sitting uselessly beside it.
+- **Untestable assumptions are surfaced, never silently passed.**
+  Independence with no id column resolves through
+  `check_independence_design` to UNTESTABLE and appears on every candidate
+  that assumes it, so an ELIGIBLE t-test still shows that independence rests
+  on the user's word.
+- **Section 7.4's worked example reproduces**: every check lands on the
+  status that table gives (Shapiro FAIL/FAIL, descriptive skew BORDERLINE at
+  1.89/1.70 against the spec's 1.9/2.2, Levene FAIL, sample size PASS,
+  same-shape PASS) and all six candidate statuses match. The statistics
+  cannot match — the spec quotes numbers from a dataset it does not ship.
+  One documented difference: Section 7.3's `two_independent_numeric` family
+  has eight methods, Section 7.4's table shows six; the two it omits
+  (`bootstrap_diff`, `ks_two_sample`) are eligible here, asserted separately
+  rather than folded in quietly.
+- **Spec extensions**, each mirroring something already in Section 7.1:
+  `QuestionSpec.reference_value` and `reference_proportions` (a
+  DISTRIBUTION_FIT question is asked against a reference, and
+  `equivalence_bounds` already did this for EQUIVALENCE); a family-level
+  `prepare` hook (a factorial design's homoscedasticity assumption is about
+  its cells, not either factor's margin); `check_measurement_level`'s
+  `fact_id` now includes the required scale, since the same column is
+  legitimately checked against different scales by different candidates and
+  those are different facts.
+- **`docs/eligibility_table.md` is generated**, not written, by
+  `scripts/generate_eligibility_table.py`, and a test fails if the committed
+  file and a fresh render disagree. A hand-maintained table would drift the
+  first time an assumption changed, and a stale one is worse than none: it
+  would be read as a statement about the current code.
+- **Scenario generators**: `paired_as_independent`, `heteroscedastic_groups`
+  and `heavy_tails_small_n` added to `tests/scenarios/generators.py`
+  (Section 15.3), each asserted against the behaviour that table names.
+- **One convention worth your decision**: `LARGE_N_FOR_CLT = 100` with
+  `MAX_SKEW_FOR_CLT = 2.0` is the threshold above which a normality failure
+  is waived for a mean-based test. Section 6.7 says "normality or large n"
+  without fixing "large". It is set high deliberately, because Section 7.4
+  expects a CAVEAT at n = 38/41; persona policies (Section 8.1) layer their
+  own stricter rules on top.
 
 ### 2026-09-25 — M3.4 (tag `m3.4`)
 Closes M3's acceptance criterion (Section 16: "every test returns effect

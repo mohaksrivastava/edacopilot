@@ -86,7 +86,10 @@ def _trimmed_mean(x: np.ndarray, g: int) -> float:
     kind="test",
     stage="hypothesis",
     tags={"parametric", "two_sample", "independent"},
-    assumptions={"hard": ["numeric_outcome"], "soft": ["normality_or_large_n", "equal_variance"]},
+    assumptions={
+        "hard": ["numeric_outcome", "independent", "min_n_per_group>=2"],
+        "soft": ["normality_or_large_n", "equal_variance"],
+    },
     estimand="difference in means (independent groups, equal variance)",
     code_template=(
         "edacore.stattests.two_sample.student_t("
@@ -137,7 +140,7 @@ def student_t(
     kind="test",
     stage="hypothesis",
     tags={"parametric", "two_sample", "independent"},
-    assumptions={"hard": ["numeric_outcome"], "soft": ["normality_or_large_n"]},
+    assumptions={"hard": ["numeric_outcome", "independent"], "soft": ["normality_or_large_n"]},
     estimand="difference in means (independent groups, unequal variance)",
     code_template=(
         "edacore.stattests.two_sample.welch_t("
@@ -189,7 +192,7 @@ def welch_t(
     kind="test",
     stage="hypothesis",
     tags={"robust", "two_sample", "independent"},
-    assumptions={"hard": ["numeric_outcome"], "soft": []},
+    assumptions={"hard": ["numeric_outcome", "independent"], "soft": []},
     estimand="difference in trimmed means (robust to outliers)",
     code_template=(
         "edacore.stattests.two_sample.yuen_trimmed_t("
@@ -265,7 +268,7 @@ def yuen_trimmed_t(
     kind="test",
     stage="hypothesis",
     tags={"nonparametric", "two_sample", "independent"},
-    assumptions={"hard": ["ordinal_or_higher"], "soft": []},
+    assumptions={"hard": ["ordinal_or_higher", "independent"], "soft": ["same_shape"]},
     estimand="stochastic dominance between two independent groups",
     code_template=(
         "edacore.stattests.two_sample.mann_whitney("
@@ -319,7 +322,7 @@ def mann_whitney(
     kind="test",
     stage="hypothesis",
     tags={"nonparametric", "two_sample", "independent"},
-    assumptions={"hard": ["ordinal_or_higher"], "soft": []},
+    assumptions={"hard": ["ordinal_or_higher", "independent"], "soft": []},
     estimand="relative effect P(X < Y) + 0.5*P(X == Y) between two independent groups",
     code_template=(
         "edacore.stattests.two_sample.brunner_munzel("
@@ -395,7 +398,7 @@ def brunner_munzel(
     kind="test",
     stage="hypothesis",
     tags={"resampling", "two_sample", "independent"},
-    assumptions={"hard": ["numeric_outcome"], "soft": []},
+    assumptions={"hard": ["numeric_outcome", "independent", "exchangeability"], "soft": []},
     estimand="difference in means (independent groups, permutation-based p-value)",
     code_template=(
         "edacore.stattests.two_sample.permutation_test_2s("
@@ -476,7 +479,7 @@ def permutation_test_2s(
     kind="test",
     stage="hypothesis",
     tags={"resampling", "two_sample", "independent"},
-    assumptions={"hard": ["numeric_outcome"], "soft": []},
+    assumptions={"hard": ["numeric_outcome", "independent"], "soft": []},
     estimand="difference in a summary statistic, with a bootstrap CI (no p-value)",
     code_template=(
         "edacore.stattests.two_sample.bootstrap_diff("
@@ -532,7 +535,7 @@ def bootstrap_diff(
     kind="test",
     stage="hypothesis",
     tags={"nonparametric", "two_sample", "independent", "distribution"},
-    assumptions={"hard": ["numeric_or_ordinal"], "soft": []},
+    assumptions={"hard": ["continuous", "independent"], "soft": []},
     estimand="whether two independent samples come from the same distribution",
     code_template=(
         "edacore.stattests.two_sample.ks_two_sample("
@@ -564,7 +567,7 @@ def ks_two_sample(
     kind="test",
     stage="hypothesis",
     tags={"parametric", "two_sample", "paired"},
-    assumptions={"hard": ["numeric_outcome"], "soft": ["normality_of_differences"]},
+    assumptions={"hard": ["numeric_outcome", "paired"], "soft": ["normality_of_differences"]},
     estimand="mean difference between paired measurements",
     code_template=(
         "edacore.stattests.two_sample.paired_t("
@@ -607,7 +610,7 @@ def paired_t(
     kind="test",
     stage="hypothesis",
     tags={"nonparametric", "two_sample", "paired"},
-    assumptions={"hard": ["numeric_or_ordinal"], "soft": ["symmetry_of_differences"]},
+    assumptions={"hard": ["numeric_or_ordinal", "paired"], "soft": ["symmetry_of_differences"]},
     estimand="median difference between paired measurements",
     code_template=(
         "edacore.stattests.two_sample.wilcoxon_signed_rank("
@@ -647,7 +650,7 @@ def wilcoxon_signed_rank(
     kind="test",
     stage="hypothesis",
     tags={"nonparametric", "two_sample", "paired"},
-    assumptions={"hard": ["ordinal_or_higher"], "soft": []},
+    assumptions={"hard": ["ordinal_or_higher", "paired"], "soft": []},
     estimand="median difference between paired measurements (sign only)",
     code_template=(
         "edacore.stattests.two_sample.sign_test_paired("
@@ -692,7 +695,7 @@ def sign_test_paired(
     kind="test",
     stage="hypothesis",
     tags={"resampling", "two_sample", "paired"},
-    assumptions={"hard": ["numeric_outcome"], "soft": []},
+    assumptions={"hard": ["numeric_outcome", "paired"], "soft": []},
     estimand="mean difference between paired measurements (permutation-based p-value)",
     code_template=(
         "edacore.stattests.two_sample.permutation_test_paired("

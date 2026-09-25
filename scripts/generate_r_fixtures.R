@@ -1595,3 +1595,76 @@ write_fixture("kendall_tau_ci__rank_corr_n20", list(
 ))
 
 cat("Wrote M3.4 non-vacuous-CI fixtures to", out_dir, "\n")
+
+# ---------------------------------------------------------------------------
+# M4: four Section 6.6 checks the eligibility engine needs in order to resolve
+# every hard/soft assumption name the Section 6.7 registry uses. Appended last
+# and reusing datasets built above -- no new RNG draws -- so no fixture above
+# can shift.
+# ---------------------------------------------------------------------------
+
+# check_symmetry: Wilcoxon's symmetry assumption, read off the sample
+# skewness. moments::skewness is already the reference for
+# check_normality_descriptive, so the same function is used here on both a
+# symmetric (paired differences) and a badly skewed sample.
+paired_diffs <- paired_after - paired_before
+write_fixture("check_symmetry__paired_before_after", list(
+  r_function = "moments::skewness on (after - before)", data = "paired_before_after.csv",
+  skewness = moments::skewness(paired_diffs)
+))
+write_fixture("check_symmetry__skewed_sample", list(
+  r_function = "moments::skewness", data = "skewed_sample.csv",
+  skewness = moments::skewness(skewed_sample)
+))
+
+# check_influential_outliers: Cook's distance from the simple OLS fit, the
+# soft assumption Section 6.7 attaches to pearson. stats::cooks.distance is
+# base R.
+cooks_reg <- cooks.distance(lm(y ~ x, data = data.frame(x = x_reg, y = y_reg)))
+write_fixture("check_influential_outliers__regression_xy", list(
+  r_function = "max(stats::cooks.distance(lm(y ~ x)))", data = "regression_xy.csv",
+  max_cooks_d = unname(max(cooks_reg)), n = length(cooks_reg),
+  threshold_4_over_n = 4 / length(cooks_reg)
+))
+# A planted high-leverage point, so the FAIL branch is exercised too.
+infl_x <- c(x_reg, 200)
+infl_y <- c(y_reg, 5)
+write_data("regression_xy_influential", data.frame(x = infl_x, y = infl_y))
+cooks_infl <- cooks.distance(lm(y ~ x, data = data.frame(x = infl_x, y = infl_y)))
+write_fixture("check_influential_outliers__regression_xy_influential", list(
+  r_function = "max(stats::cooks.distance(lm(y ~ x)))", data = "regression_xy_influential.csv",
+  max_cooks_d = unname(max(cooks_infl)), n = length(cooks_infl),
+  threshold_4_over_n = 4 / length(cooks_infl)
+))
+
+# check_balanced_design / check_proportion_counts are pure counting, with no
+# distribution behind them -- but Section 15.1's rule is that every reference
+# value comes from running this script, so they are computed here too rather
+# than typed into the Python test.
+rm_counts <- table(rm_long$subject, rm_long$condition)
+write_fixture("check_balanced_design__repeated_measures", list(
+  r_function = "table(subject, condition) cell counts", data = "repeated_measures_long.csv",
+  min_cell = min(rm_counts), max_cell = max(rm_counts),
+  n_subjects = nrow(rm_counts), n_levels = ncol(rm_counts)
+))
+write_fixture("check_proportion_counts__proportions_two_sample", list(
+  r_function = "min over groups of min(n*p, n*(1-p))",
+  x1 = x_prop[1], n1 = n_prop[1], x2 = x_prop[2], n2 = n_prop[2],
+  min_successes_or_failures = min(x_prop, n_prop - x_prop)
+))
+
+cat("Wrote M4 assumption-check fixtures to", out_dir, "\n")
+
+# check_expected_counts_gof: the goodness-of-fit counterpart of
+# check_expected_counts. chisq.test(x, p=) reports the expected counts it
+# used, which is exactly what the rule is applied to.
+gof_expected <- chisq.test(category_counts, p = expected_probs)$expected
+write_fixture("check_expected_counts_gof__category_counts", list(
+  r_function = "stats::chisq.test(x, p=)$expected", data = "category_counts.csv",
+  expected_probs = unname(expected_probs),
+  expected_counts = unname(gof_expected),
+  min_expected = min(gof_expected),
+  pct_below_5 = 100 * mean(gof_expected < 5)
+))
+
+cat("Wrote M4 goodness-of-fit expected-counts fixture to", out_dir, "\n")

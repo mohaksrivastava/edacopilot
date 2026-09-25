@@ -78,7 +78,7 @@ def _clean_pair(
     kind="test",
     stage="hypothesis",
     tags={"categorical"},
-    assumptions={"hard": ["categorical", "expected_counts"], "soft": []},
+    assumptions={"hard": ["categorical", "expected_counts", "independent"], "soft": []},
     estimand="association between two categorical variables",
     code_template=(
         "edacore.stattests.categorical.chi2_independence("
@@ -170,7 +170,7 @@ def _fisher_rxc_exact_p(table: np.ndarray) -> float | None:
     kind="test",
     stage="hypothesis",
     tags={"categorical", "exact"},
-    assumptions={"hard": ["categorical"], "soft": []},
+    assumptions={"hard": ["categorical", "independent"], "soft": []},
     estimand="association between two categorical variables",
     code_template=(
         "edacore.stattests.categorical.fisher_exact("
@@ -251,7 +251,7 @@ def fisher_exact(
     kind="test",
     stage="hypothesis",
     tags={"categorical"},
-    assumptions={"hard": ["categorical", "expected_counts"], "soft": []},
+    assumptions={"hard": ["categorical", "expected_counts", "independent"], "soft": []},
     estimand="association between two categorical variables (likelihood-ratio)",
     code_template=(
         "edacore.stattests.categorical.g_test("
@@ -314,7 +314,7 @@ def g_test(
     kind="test",
     stage="hypothesis",
     tags={"categorical", "paired"},
-    assumptions={"hard": ["paired_binary"], "soft": []},
+    assumptions={"hard": ["paired_binary", "paired"], "soft": []},
     estimand="change in a paired binary outcome",
     code_template=(
         "edacore.stattests.categorical.mcnemar("
@@ -383,7 +383,10 @@ def mcnemar(
     kind="test",
     stage="hypothesis",
     tags={"categorical"},
-    assumptions={"hard": ["binary_outcome"], "soft": ["np_at_least_10"]},
+    assumptions={
+        "hard": ["binary_outcome", "independent", "np_at_least_10"],
+        "soft": [],
+    },
     estimand="difference in proportions between two independent groups",
     code_template=(
         "edacore.stattests.categorical.two_proportion_z("

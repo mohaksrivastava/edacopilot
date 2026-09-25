@@ -1,0 +1,1 @@
+{"r_function":"max(stats::cooks.distance(lm(y ~ x)))","data":"regression_xy.csv","max_cooks_d":0.1067774421074515,"n":80,"threshold_4_over_n":0.05}
