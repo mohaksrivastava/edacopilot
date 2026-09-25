@@ -1,0 +1,1 @@
+{"r_function":"DescTools::SpearmanRho(conf.level=0.95)","data":"correlation_small_no_ties.csv","estimate":0.880952380952381,"ci_low":0.4648514946020199,"ci_high":0.9783080286932698}

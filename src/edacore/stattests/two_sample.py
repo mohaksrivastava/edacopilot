@@ -17,7 +17,15 @@ import pandas as pd
 from scipy import stats
 
 from edacore.contracts import TestResult
-from edacore.effect_sizes import magnitude_label
+from edacore.effect_sizes import (
+    _clopper_pearson_ci,
+    d_z,
+    hedges_g,
+    hedges_g_av,
+    magnitude_label,
+    rank_biserial,
+    rank_biserial_paired,
+)
 from edacore.registry import register
 from edacore.stattests._shared import (
     MAX_EXACT_PERMUTATIONS,
@@ -99,8 +107,10 @@ def student_t(
     result = stats.ttest_ind(x, y, equal_var=True)
     ci_bounds = result.confidence_interval(ci)
     n1, n2 = len(x), len(y)
-    pooled_sd = np.sqrt(((n1 - 1) * x.var(ddof=1) + (n2 - 1) * y.var(ddof=1)) / (n1 + n2 - 2))
-    d = float((x.mean() - y.mean()) / pooled_sd)
+    # Section 6.7 specifies Hedges' g, not Cohen's d: with the pooled SD
+    # already assumed by this test, the only difference is the exact J
+    # small-sample correction, which g applies and d does not.
+    g = hedges_g(df, value_col, group_col, (g1, g2), ci=ci)
 
     return TestResult(
         fact_id=f"student_t.{value_col}",
@@ -113,9 +123,10 @@ def student_t(
         estimate=float(x.mean() - y.mean()),
         ci=(float(ci_bounds.low), float(ci_bounds.high)),
         ci_level=ci,
-        effect_size=d,
-        effect_size_name="cohens_d",
-        effect_magnitude=magnitude_label(d, "cohens_d"),
+        effect_size=g["estimate"],
+        effect_size_name="hedges_g",
+        effect_size_ci=(g["ci_low"], g["ci_high"]),
+        effect_magnitude=magnitude_label(g["estimate"], "hedges_g"),
         n={str(g1): n1, str(g2): n2},
         warnings=warnings,
     )
@@ -147,8 +158,11 @@ def welch_t(
     result = stats.ttest_ind(x, y, equal_var=False)
     ci_bounds = result.confidence_interval(ci)
     n1, n2 = len(x), len(y)
-    avg_var = (x.var(ddof=1) + y.var(ddof=1)) / 2
-    d = float((x.mean() - y.mean()) / np.sqrt(avg_var))
+    # Hedges' g(av): the average-variance denominator, so the effect size
+    # makes no equal-variance assumption the Welch test itself drops. Up to
+    # M3.3 this field was labelled hedges_g but held Cohen's d(av), with no
+    # J correction (ARCHITECTURE.md Section 18, M3.4).
+    g = hedges_g_av(df, value_col, group_col, (g1, g2), ci=ci)
 
     return TestResult(
         fact_id=f"welch_t.{value_col}",
@@ -161,9 +175,10 @@ def welch_t(
         estimate=float(x.mean() - y.mean()),
         ci=(float(ci_bounds.low), float(ci_bounds.high)),
         ci_level=ci,
-        effect_size=d,
-        effect_size_name="hedges_g",
-        effect_magnitude=magnitude_label(d, "hedges_g"),
+        effect_size=g["estimate"],
+        effect_size_name="hedges_g_av",
+        effect_size_ci=(g["ci_low"], g["ci_high"]),
+        effect_magnitude=magnitude_label(g["estimate"], "hedges_g_av"),
         n={str(g1): n1, str(g2): n2},
         warnings=warnings,
     )
@@ -230,6 +245,16 @@ def yuen_trimmed_t(
         estimate=float(diff),
         ci=(float(diff - crit * se), float(diff + crit * se)),
         ci_level=ci,
+        # Section 6.7's effect size for this test is the trimmed-mean
+        # difference itself, so it shares the estimate's interval. It is
+        # unstandardized, hence no effect_magnitude (see
+        # effect_sizes.UNLABELLED_MEASURES). WRS2's Wilcox-Tian xi is the
+        # standardized alternative Section 6.7 lists as optional; it is not
+        # reported here because WRS2 gives it only a bootstrap CI whose
+        # draws cannot be matched against R.
+        effect_size=float(diff),
+        effect_size_name="trimmed_mean_difference",
+        effect_size_ci=(float(diff - crit * se), float(diff + crit * se)),
         n={str(g1): n1, str(g2): n2},
         warnings=warnings,
     )
@@ -244,11 +269,16 @@ def yuen_trimmed_t(
     estimand="stochastic dominance between two independent groups",
     code_template=(
         "edacore.stattests.two_sample.mann_whitney("
-        "{df}, group_col={group_col!r}, value_col={value_col!r}, nan_policy={nan_policy!r})"
+        "{df}, group_col={group_col!r}, value_col={value_col!r}, ci={ci}, "
+        "nan_policy={nan_policy!r})"
     ),
 )
 def mann_whitney(
-    df: pd.DataFrame, group_col: str, value_col: str, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame,
+    group_col: str,
+    value_col: str,
+    ci: float = 0.95,
+    nan_policy: NanPolicy = "omit",
 ) -> TestResult:
     warnings: list[str] = []
     x, y, g1, g2 = _clean_groups(df, group_col, value_col, nan_policy, warnings)
@@ -265,7 +295,7 @@ def mann_whitney(
     has_ties = len(np.unique(combined)) != len(combined)
     method = "exact" if (n1 < 50 and n2 < 50 and not has_ties) else "asymptotic"
     result = stats.mannwhitneyu(x, y, alternative="two-sided", method=method)
-    r = float(2 * result.statistic / (n1 * n2) - 1)
+    rb = rank_biserial(df, value_col, group_col, (g1, g2), ci=ci)
 
     return TestResult(
         fact_id=f"mann_whitney.{value_col}",
@@ -274,9 +304,11 @@ def mann_whitney(
         statistic=float(result.statistic),
         statistic_name="U",
         p_value=float(result.pvalue),
-        effect_size=r,
+        effect_size=rb["estimate"],
         effect_size_name="rank_biserial",
-        effect_magnitude=magnitude_label(r, "rank_biserial"),
+        effect_size_ci=(rb["ci_low"], rb["ci_high"]),
+        ci_level=ci,
+        effect_magnitude=magnitude_label(rb["estimate"], "rank_biserial"),
         n={str(g1): n1, str(g2): n2},
         warnings=warnings,
     )
@@ -291,12 +323,22 @@ def mann_whitney(
     estimand="relative effect P(X < Y) + 0.5*P(X == Y) between two independent groups",
     code_template=(
         "edacore.stattests.two_sample.brunner_munzel("
-        "{df}, group_col={group_col!r}, value_col={value_col!r}, nan_policy={nan_policy!r})"
+        "{df}, group_col={group_col!r}, value_col={value_col!r}, ci={ci}, "
+        "nan_policy={nan_policy!r})"
     ),
 )
 def brunner_munzel(
-    df: pd.DataFrame, group_col: str, value_col: str, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame,
+    group_col: str,
+    value_col: str,
+    ci: float = 0.95,
+    nan_policy: NanPolicy = "omit",
 ) -> TestResult:
+    """The CI of the relative effect is Brunner & Munzel's own:
+    p_hat +/- t(df) * sqrt(n1*Sx + n2*Sy) / (n1*n2), with the same
+    Satterthwaite-type df as the test. `brunnermunzel::brunnermunzel.test`
+    computes it in compiled Fortran, so it was reconstructed from the
+    published formula and checked against R's output (~1e-16)."""
     warnings: list[str] = []
     x, y, g1, g2 = _clean_groups(df, group_col, value_col, nan_policy, warnings)
 
@@ -323,6 +365,10 @@ def brunner_munzel(
     df_denom = (n1 * s_x) ** 2 / (n1 - 1) + (n2 * s_y) ** 2 / (n2 - 1)
     df_bm = df_numer / df_denom
 
+    se_p = float(np.sqrt(n1 * s_x + n2 * s_y) / (n1 * n2))
+    t_crit = float(stats.t.ppf(1 - (1 - ci) / 2, df_bm))
+    p_ci = (p_relative - t_crit * se_p, p_relative + t_crit * se_p)
+
     return TestResult(
         fact_id=f"brunner_munzel.{value_col}",
         function="brunner_munzel",
@@ -332,7 +378,13 @@ def brunner_munzel(
         df=float(df_bm),
         p_value=float(result.pvalue),
         estimate=p_relative,
+        ci=p_ci,
+        ci_level=ci,
+        # The relative effect is the effect size; it is a probability, not
+        # a standardized difference, so it carries no magnitude label.
+        effect_size=p_relative,
         effect_size_name="relative_effect",
+        effect_size_ci=p_ci,
         n={str(g1): n1, str(g2): n2},
         warnings=warnings,
     )
@@ -348,7 +400,7 @@ def brunner_munzel(
     code_template=(
         "edacore.stattests.two_sample.permutation_test_2s("
         "{df}, group_col={group_col!r}, value_col={value_col!r}, n_resamples={n_resamples}, "
-        "random_state={random_state}, nan_policy={nan_policy!r})"
+        "ci={ci}, n_boot={n_boot}, random_state={random_state}, nan_policy={nan_policy!r})"
     ),
 )
 def permutation_test_2s(
@@ -356,6 +408,8 @@ def permutation_test_2s(
     group_col: str,
     value_col: str,
     n_resamples: int = 10_000,
+    ci: float = 0.95,
+    n_boot: int = 2000,
     random_state: int = 0,
     nan_policy: NanPolicy = "omit",
 ) -> TestResult:
@@ -381,6 +435,24 @@ def permutation_test_2s(
     )
     warnings.append(f"permutation mode: {mode} ({n_arr} possible arrangements)")
 
+    # A permutation test yields a p-value but no interval, so Section 6.7's
+    # "bootstrap if no analytic CI" rule applies: a BCa bootstrap of the
+    # same mean difference, seeded by the same random_state. It is a
+    # resampling interval, not an R-matchable closed form.
+    boot = stats.bootstrap(
+        (x, y),
+        _mean_diff,
+        method="BCa",
+        confidence_level=ci,
+        n_resamples=n_boot,
+        random_state=random_state,
+    )
+    diff_ci = (
+        float(boot.confidence_interval.low),
+        float(boot.confidence_interval.high),
+    )
+    warnings.append(f"CI is a BCa bootstrap ({n_boot} resamples, random_state={random_state})")
+
     return TestResult(
         fact_id=f"permutation_test_2s.{value_col}",
         function="permutation_test_2s",
@@ -389,6 +461,11 @@ def permutation_test_2s(
         statistic_name="mean_diff",
         p_value=float(result.pvalue),
         estimate=float(x.mean() - y.mean()),
+        ci=diff_ci,
+        ci_level=ci,
+        effect_size=float(x.mean() - y.mean()),
+        effect_size_name="mean_difference",
+        effect_size_ci=diff_ci,
         n={str(g1): n1, str(g2): n2},
         warnings=warnings,
     )
@@ -503,7 +580,7 @@ def paired_t(
 
     result = stats.ttest_1samp(diffs, 0)
     ci_bounds = result.confidence_interval(ci)
-    d_z = float(diffs.mean() / diffs.std(ddof=1))
+    dz = d_z(df, b, a, ci=ci)
 
     return TestResult(
         fact_id=f"paired_t.{a}_{b}",
@@ -516,9 +593,10 @@ def paired_t(
         estimate=float(diffs.mean()),
         ci=(float(ci_bounds.low), float(ci_bounds.high)),
         ci_level=ci,
-        effect_size=d_z,
+        effect_size=dz["estimate"],
         effect_size_name="d_z",
-        effect_magnitude=magnitude_label(d_z, "d_z"),
+        effect_size_ci=(dz["ci_low"], dz["ci_high"]),
+        effect_magnitude=magnitude_label(dz["estimate"], "d_z"),
         n={f"{a}-{b}": len(diffs)},
         warnings=warnings,
     )
@@ -533,17 +611,18 @@ def paired_t(
     estimand="median difference between paired measurements",
     code_template=(
         "edacore.stattests.two_sample.wilcoxon_signed_rank("
-        "{df}, a={a!r}, b={b!r}, nan_policy={nan_policy!r})"
+        "{df}, a={a!r}, b={b!r}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
 def wilcoxon_signed_rank(
-    df: pd.DataFrame, a: str, b: str, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame, a: str, b: str, ci: float = 0.95, nan_policy: NanPolicy = "omit"
 ) -> TestResult:
     warnings: list[str] = []
     x, y = clean_paired(df, a, b, nan_policy, warnings)
     diffs = x - y
 
-    v, p_value, r = _wilcoxon_signed_rank_r_matched(diffs)
+    v, p_value, _ = _wilcoxon_signed_rank_r_matched(diffs)
+    rb = rank_biserial_paired(df, a, b, ci=ci)
 
     return TestResult(
         fact_id=f"wilcoxon_signed_rank.{a}_{b}",
@@ -553,9 +632,11 @@ def wilcoxon_signed_rank(
         statistic_name="V",
         p_value=p_value,
         estimate=float(np.median(diffs)),
-        effect_size=r,
+        ci_level=ci,
+        effect_size=rb["estimate"],
         effect_size_name="rank_biserial",
-        effect_magnitude=magnitude_label(r, "rank_biserial"),
+        effect_size_ci=(rb["ci_low"], rb["ci_high"]),
+        effect_magnitude=magnitude_label(rb["estimate"], "rank_biserial"),
         n={f"{a}-{b}": len(diffs)},
         warnings=warnings,
     )
@@ -570,11 +651,11 @@ def wilcoxon_signed_rank(
     estimand="median difference between paired measurements (sign only)",
     code_template=(
         "edacore.stattests.two_sample.sign_test_paired("
-        "{df}, a={a!r}, b={b!r}, nan_policy={nan_policy!r})"
+        "{df}, a={a!r}, b={b!r}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
 def sign_test_paired(
-    df: pd.DataFrame, a: str, b: str, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame, a: str, b: str, ci: float = 0.95, nan_policy: NanPolicy = "omit"
 ) -> TestResult:
     warnings: list[str] = []
     x, y = clean_paired(df, a, b, nan_policy, warnings)
@@ -586,6 +667,7 @@ def sign_test_paired(
 
     result = stats.binomtest(n_pos, n_nonzero, p=0.5)
     proportion = n_pos / n_nonzero if n_nonzero else float("nan")
+    prop_ci = _clopper_pearson_ci(n_pos, n_nonzero, ci) if n_nonzero else (float("nan"),) * 2
 
     return TestResult(
         fact_id=f"sign_test_paired.{a}_{b}",
@@ -595,8 +677,11 @@ def sign_test_paired(
         statistic_name="n_positive",
         p_value=float(result.pvalue),
         estimate=proportion,
+        ci=prop_ci,
+        ci_level=ci,
         effect_size=proportion,
         effect_size_name="proportion",
+        effect_size_ci=prop_ci,
         n={f"{a}-{b}": n_nonzero},
         warnings=warnings,
     )
@@ -611,8 +696,8 @@ def sign_test_paired(
     estimand="mean difference between paired measurements (permutation-based p-value)",
     code_template=(
         "edacore.stattests.two_sample.permutation_test_paired("
-        "{df}, a={a!r}, b={b!r}, n_resamples={n_resamples}, random_state={random_state}, "
-        "nan_policy={nan_policy!r})"
+        "{df}, a={a!r}, b={b!r}, n_resamples={n_resamples}, ci={ci}, n_boot={n_boot}, "
+        "random_state={random_state}, nan_policy={nan_policy!r})"
     ),
 )
 def permutation_test_paired(
@@ -620,6 +705,8 @@ def permutation_test_paired(
     a: str,
     b: str,
     n_resamples: int = 10_000,
+    ci: float = 0.95,
+    n_boot: int = 2000,
     random_state: int = 0,
     nan_policy: NanPolicy = "omit",
 ) -> TestResult:
@@ -645,6 +732,24 @@ def permutation_test_paired(
     )
     warnings.append(f"permutation mode: {mode} ({n_arr} possible arrangements)")
 
+    # As in permutation_test_2s: no analytic interval exists, so Section
+    # 6.7's bootstrap rule applies. Resampling is over PAIRS (one sample of
+    # differences), never over a and b independently, which would destroy
+    # the pairing.
+    boot = stats.bootstrap(
+        (x - y,),
+        np.mean,
+        method="BCa",
+        confidence_level=ci,
+        n_resamples=n_boot,
+        random_state=random_state,
+    )
+    diff_ci = (
+        float(boot.confidence_interval.low),
+        float(boot.confidence_interval.high),
+    )
+    warnings.append(f"CI is a BCa bootstrap ({n_boot} resamples, random_state={random_state})")
+
     return TestResult(
         fact_id=f"permutation_test_paired.{a}_{b}",
         function="permutation_test_paired",
@@ -653,6 +758,11 @@ def permutation_test_paired(
         statistic_name="mean_diff",
         p_value=float(result.pvalue),
         estimate=float(np.mean(x - y)),
+        ci=diff_ci,
+        ci_level=ci,
+        effect_size=float(np.mean(x - y)),
+        effect_size_name="mean_difference",
+        effect_size_ci=diff_ci,
         n={f"{a}-{b}": n},
         warnings=warnings,
     )

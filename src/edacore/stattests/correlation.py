@@ -49,6 +49,7 @@ from scipy.special import digamma
 from statsmodels.stats.multitest import multipletests
 
 from edacore.contracts import TestResult
+from edacore.effect_sizes import _fisher_z_ci, magnitude_label
 from edacore.registry import register
 from edacore.stattests._shared import NanPolicy
 
@@ -65,6 +66,112 @@ def _clean_pair(
             raise ValueError(f"{n_dropped} row(s) missing '{x}'/'{y}', nan_policy=raise")
         warnings.append(f"{n_dropped} row(s) dropped: missing '{x}' or '{y}' (nan_policy='omit')")
     return clean
+
+
+def _spearman_rho_ci(rho: float, n: int, ci: float) -> tuple[float, float]:
+    """CI for Spearman's rho. R's `cor.test` reports none, so the reference
+    is `DescTools::SpearmanRho(conf.level=)`: Fisher z with
+    SE = 1 / sqrt(n - 3), clamped to [-1, 1]. Verified to ~1e-16.
+    """
+    return _fisher_z_ci(rho, 1 / np.sqrt(n - 3), ci)
+
+
+# Above this many contingency-table cells, tau-b's delta-method CI would
+# allocate more memory than it is worth: the table is (distinct x) x
+# (distinct y), so tie-free continuous data makes it n x n. At the cap the
+# working set is roughly 100 MB, reached at about n = 2000 tie-free
+# observations; ordinal/tied data (what DescTools::KendallTauB is actually
+# meant for) stays far below it at any n.
+MAX_KENDALL_TABLE_CELLS = 4_000_000
+
+
+def _kendall_concordance_excess(table: np.ndarray) -> tuple[np.ndarray, float]:
+    """Per-cell (concordant - discordant) pair counts, and their total
+    (C - D), as `DescTools::ConDisPairs` computes them: for each cell, the
+    observations in the two quadrants that agree with it (up-left plus
+    down-right) minus the two that disagree (up-right plus down-left).
+
+    Only the difference is returned because only the difference is used --
+    by tau-b itself and by every term of the delta-method variance -- which
+    halves the temporaries this has to hold. DescTools re-sums a quadrant
+    per cell, O((r*c)^2); this gets the same numbers from one 2-D
+    cumulative sum.
+    """
+    n_rows, n_cols = table.shape
+    cum = np.zeros((n_rows + 1, n_cols + 1))
+    cum[1:, 1:] = table.cumsum(axis=0).cumsum(axis=1)
+    total = cum[n_rows, n_cols]
+
+    excess = cum[:n_rows, :n_cols].copy()  # up-left
+    excess += total - cum[1:, n_cols][:, None] - cum[n_rows, 1:][None, :] + cum[1:, 1:]
+    excess -= cum[:n_rows, n_cols][:, None] - cum[:n_rows, 1:]  # up-right
+    excess -= cum[n_rows, :n_cols][None, :] - cum[1:, :n_cols]  # down-left
+    return excess, float((excess * table).sum() / 2)
+
+
+def _kendall_tau_b_ci(
+    x: np.ndarray, y: np.ndarray, tau_b: float, ci: float, warnings: list[str]
+) -> tuple[float, float]:
+    """CI for tau-b, ported from `DescTools::KendallTauB(conf.level=)`.
+    R's `cor.test` reports no interval for tau.
+
+    The standard error is the delta-method asymptotic variance of tau-b
+    computed from the joint contingency table (the SAS/SPSS "ASE"), which
+    -- unlike a Fisher-z interval -- accounts for ties. Verified to ~1e-16
+    against R on both a tied table and continuous (tie-free) data.
+
+    Above `MAX_KENDALL_TABLE_CELLS` that table is too large to build, and
+    the interval falls back to Fisher z with SE = 1/sqrt(n - 3),
+    disclosed in `warnings`. That fallback ignores ties -- but a table
+    that large is one with hardly any ties to account for, which is
+    exactly when the two agree most closely.
+    """
+    n_obs = len(x)
+    n_distinct_x, n_distinct_y = len(np.unique(x)), len(np.unique(y))
+    if n_distinct_x * n_distinct_y > MAX_KENDALL_TABLE_CELLS:
+        warnings.append(
+            f"{n_distinct_x} x {n_distinct_y} distinct value pairs exceeds "
+            f"{MAX_KENDALL_TABLE_CELLS:,} cells, so the CI is a Fisher-z approximation "
+            "(SE = 1/sqrt(n - 3)) rather than DescTools::KendallTauB's tie-aware "
+            "delta-method interval"
+        )
+        return _fisher_z_ci(tau_b, 1 / np.sqrt(n_obs - 3), ci)
+
+    table = pd.crosstab(pd.Series(x), pd.Series(y)).to_numpy(dtype=float)
+    excess, conc_minus_disc = _kendall_concordance_excess(table)
+    n = float(table.sum())
+
+    props = table / n
+    p_diff = excess / n
+    big_p_diff = 2 * conc_minus_disc / n**2
+    row_p, col_p = props.sum(axis=1), props.sum(axis=0)
+    delta1 = np.sqrt(1 - (row_p**2).sum())
+    delta2 = np.sqrt(1 - (col_p**2).sum())
+    tau_phi = (2 * p_diff + big_p_diff * col_p[None, :]) * delta2 * delta1 + (
+        big_p_diff * row_p[:, None] * delta2
+    ) / delta1
+    variance = (
+        ((props * tau_phi**2).sum() - (props * tau_phi).sum() ** 2) / (delta1 * delta2) ** 4
+    ) / n
+    if variance < np.finfo(float).eps * 10:
+        variance = 0.0
+
+    z = stats.norm.ppf(1 - (1 - ci) / 2)
+    half_width = z * np.sqrt(variance)
+    return float(max(tau_b - half_width, -1.0)), float(min(tau_b + half_width, 1.0))
+
+
+def _kendall_tau_b_from_table(x: np.ndarray, y: np.ndarray) -> float:
+    """tau-b recomputed from the contingency table, for cross-checking
+    scipy's rank-based value (see `kendall_tau`). Small tables only."""
+    table = pd.crosstab(pd.Series(x), pd.Series(y)).to_numpy(dtype=float)
+    _, conc_minus_disc = _kendall_concordance_excess(table)
+    n = float(table.sum())
+    n0 = n * (n - 1) / 2
+    row_totals, col_totals = table.sum(axis=1), table.sum(axis=0)
+    ties_r = float((row_totals * (row_totals - 1) / 2).sum())
+    ties_c = float((col_totals * (col_totals - 1) / 2).sum())
+    return float(conc_minus_disc / np.sqrt((n0 - ties_r) * (n0 - ties_c)))
 
 
 @register(
@@ -110,6 +217,12 @@ def pearson(
         estimate=r,
         ci=(float(ci_bounds.low), float(ci_bounds.high)),
         ci_level=ci,
+        # r IS the effect size for a correlation, so it shares the
+        # estimate's Fisher-z interval rather than getting a second one.
+        effect_size=r,
+        effect_size_name="pearson_r",
+        effect_size_ci=(float(ci_bounds.low), float(ci_bounds.high)),
+        effect_magnitude=magnitude_label(r, "pearson_r"),
         n={"total": n},
         warnings=warnings,
     )
@@ -202,10 +315,13 @@ def _spearman_exact_p(rho: float, n: int) -> float:
     assumptions={"hard": ["ordinal_or_higher"], "soft": ["monotonicity"]},
     estimand="monotonic association between two variables",
     code_template=(
-        "edacore.stattests.correlation.spearman({df}, x={x!r}, y={y!r}, nan_policy={nan_policy!r})"
+        "edacore.stattests.correlation.spearman("
+        "{df}, x={x!r}, y={y!r}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
-def spearman(df: pd.DataFrame, x: str, y: str, nan_policy: NanPolicy = "omit") -> TestResult:
+def spearman(
+    df: pd.DataFrame, x: str, y: str, ci: float = 0.95, nan_policy: NanPolicy = "omit"
+) -> TestResult:
     warnings: list[str] = []
     clean = _clean_pair(df, x, y, nan_policy, warnings)
     xv, yv = clean[x].to_numpy(), clean[y].to_numpy()
@@ -226,6 +342,8 @@ def spearman(df: pd.DataFrame, x: str, y: str, nan_policy: NanPolicy = "omit") -
     else:
         warnings.append(f"n={n} > {_PRHO_N_MAX}: t-approximation p-value (as R's cor.test)")
 
+    rho_ci = _spearman_rho_ci(rho, n, ci)
+
     return TestResult(
         fact_id=f"spearman.{x}.{y}",
         function="spearman",
@@ -236,6 +354,12 @@ def spearman(df: pd.DataFrame, x: str, y: str, nan_policy: NanPolicy = "omit") -
         statistic_name="S",
         p_value=p_value,
         estimate=rho,
+        ci=rho_ci,
+        ci_level=ci,
+        effect_size=rho,
+        effect_size_name="spearman_rho",
+        effect_size_ci=rho_ci,
+        effect_magnitude=magnitude_label(rho, "spearman_rho"),
         n={"total": n},
         warnings=warnings,
     )
@@ -280,10 +404,12 @@ def _kendall_z_statistic(x: np.ndarray, y: np.ndarray, tau_b: float) -> float:
     estimand="ordinal association between two variables",
     code_template=(
         "edacore.stattests.correlation.kendall_tau("
-        "{df}, x={x!r}, y={y!r}, nan_policy={nan_policy!r})"
+        "{df}, x={x!r}, y={y!r}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
-def kendall_tau(df: pd.DataFrame, x: str, y: str, nan_policy: NanPolicy = "omit") -> TestResult:
+def kendall_tau(
+    df: pd.DataFrame, x: str, y: str, ci: float = 0.95, nan_policy: NanPolicy = "omit"
+) -> TestResult:
     """tau-b (scipy's default `variant='b'`, matching R's default). As in
     R's cor.test: exact null distribution of T (the concordant-pair count)
     without ties and n<50, reporting T; otherwise the normal approximation
@@ -307,6 +433,8 @@ def kendall_tau(df: pd.DataFrame, x: str, y: str, nan_policy: NanPolicy = "omit"
         reason = "ties present" if has_ties else f"n={n} >= {_KENDALL_N_EXACT}"
         warnings.append(f"{reason}: normal-approximation p-value (as R's cor.test)")
 
+    tau_ci = _kendall_tau_b_ci(xv, yv, tau_b, ci, warnings)
+
     return TestResult(
         fact_id=f"kendall_tau.{x}.{y}",
         function="kendall_tau",
@@ -315,6 +443,12 @@ def kendall_tau(df: pd.DataFrame, x: str, y: str, nan_policy: NanPolicy = "omit"
         statistic_name=statistic_name,
         p_value=p_value,
         estimate=tau_b,
+        ci=tau_ci,
+        ci_level=ci,
+        effect_size=tau_b,
+        effect_size_name="kendall_tau_b",
+        effect_size_ci=tau_ci,
+        effect_magnitude=magnitude_label(tau_b, "kendall_tau_b"),
         n={"total": n},
         warnings=warnings,
     )
@@ -363,6 +497,10 @@ def point_biserial(
         estimate=r_pb,
         ci=(float(ci_bounds.low), float(ci_bounds.high)),
         ci_level=ci,
+        effect_size=r_pb,
+        effect_size_name="point_biserial_r",
+        effect_size_ci=(float(ci_bounds.low), float(ci_bounds.high)),
+        effect_magnitude=magnitude_label(r_pb, "point_biserial_r"),
         n={"total": n},
         warnings=warnings,
     )
@@ -377,11 +515,16 @@ def point_biserial(
     estimand="linear association between two variables, controlling for others",
     code_template=(
         "edacore.stattests.correlation.partial_correlation("
-        "{df}, x={x!r}, y={y!r}, covars={covars!r}, nan_policy={nan_policy!r})"
+        "{df}, x={x!r}, y={y!r}, covars={covars!r}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
 def partial_correlation(
-    df: pd.DataFrame, x: str, y: str, covars: list[str], nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    covars: list[str],
+    ci: float = 0.95,
+    nan_policy: NanPolicy = "omit",
 ) -> TestResult:
     """Ported from ppcor::pcor.test's general formula: the partial
     correlation of x and y given any number of control variables is
@@ -410,6 +553,12 @@ def partial_correlation(
     dof = n - gp - 2
     t_stat = estimate * np.sqrt(dof / (1 - estimate**2))
     p_value = float(2 * stats.t.sf(abs(t_stat), dof))
+    # Fisher z with SE = 1/sqrt(n - k - 3), k = number of controlled
+    # variables. No installed R package reports a CI for a partial
+    # correlation, so unlike every other interval in this module the
+    # fixture evaluates this same published formula in R rather than an
+    # independent implementation of it (ARCHITECTURE.md Section 18, M3.4).
+    r_ci = _fisher_z_ci(estimate, 1 / np.sqrt(n - gp - 3), ci)
 
     return TestResult(
         fact_id=f"partial_correlation.{x}.{y}",
@@ -420,6 +569,12 @@ def partial_correlation(
         df=float(dof),
         p_value=p_value,
         estimate=estimate,
+        ci=r_ci,
+        ci_level=ci,
+        effect_size=estimate,
+        effect_size_name="partial_r",
+        effect_size_ci=r_ci,
+        effect_magnitude=magnitude_label(estimate, "partial_r"),
         n={"total": n},
         warnings=warnings,
     )

@@ -1,0 +1,1 @@
+{"r_function":"DescTools::KendallTauB(conf.level=0.95)","data":"rank_corr_n20.csv","estimate":0.1473684210526316,"ci_low":-0.1571078298844967,"ci_high":0.4518446719897599}

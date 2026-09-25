@@ -69,7 +69,13 @@ def test_repeated_measures_anova_matches_afex_default() -> None:
     assert_codegen_matches(
         registry,
         "repeated_measures_anova",
-        {"dv": "value", "subject": "subject", "within": "condition", "nan_policy": "omit"},
+        {
+            "dv": "value",
+            "subject": "subject",
+            "within": "condition",
+            "ci": 0.95,
+            "nan_policy": "omit",
+        },
         df,
         namespace=_NAMESPACE,
     )
@@ -151,3 +157,46 @@ def test_friedman_drops_subjects_incomplete_across_conditions() -> None:
     result = edacore.stattests.k_related.friedman(df, "value", "subject", "condition")
     assert result.n == {"subject": 4}
     assert any("incomplete" in w for w in result.warnings)
+
+
+# --------------------------------------------------------------------------
+# M3.4: repeated_measures_anova's partial eta-squared CI
+# --------------------------------------------------------------------------
+
+
+def test_repeated_measures_anova_partial_eta_squared_ci_matches_r() -> None:
+    """effectsize::eta_squared on the afex fit uses the UNCORRECTED F and
+    df: the sphericity correction changes the test's df, not the effect
+    size. Checked on a dataset with a real effect, so the lower bound is
+    strictly positive."""
+    df = _data("repeated_measures_effect_long")
+    ref = _ref("repeated_measures_anova__repeated_measures_effect")
+    result = edacore.stattests.k_related.repeated_measures_anova(
+        df, "value", "subject", "condition"
+    )
+    _close(result.statistic, ref["statistic"])
+    _close(result.p_value, ref["p_value_gg"])
+    assert result.effect_size_name == "partial_eta_squared"
+    _close(result.effect_size, ref["pes"])
+    assert result.effect_size_ci is not None
+    _close(result.effect_size_ci[0], ref["ci_low"])
+    _close(result.effect_size_ci[1], ref["ci_high"])
+    assert result.effect_size_ci[0] > 0
+    # The reported df ARE the GG-corrected ones, so the CI is not simply
+    # reading them back off the result.
+    assert result.df == (pytest.approx(ref["df1_gg"]), pytest.approx(ref["df2_gg"]))
+    assert ref["df1_gg"] != pytest.approx(ref["df1_uncorrected"])
+
+
+def test_repeated_measures_anova_partial_eta_squared_ci_on_the_null_dataset() -> None:
+    df = _data("repeated_measures_long")
+    ref = _ref("partial_eta_squared_rm__repeated_measures")
+    result = edacore.stattests.k_related.repeated_measures_anova(
+        df, "value", "subject", "condition"
+    )
+    _close(result.effect_size, ref["estimate"])
+    assert result.effect_size_ci == (ref["ci_low"], ref["ci_high"])
+    # effectsize::eta_squared(afex fit) == effectsize::F_to_eta2 at the
+    # uncorrected df -- the identity this implementation relies on.
+    assert ref["estimate"] == pytest.approx(ref["estimate_from_f"])
+    assert ref["ci_low"] == pytest.approx(ref["ci_low_from_f"])

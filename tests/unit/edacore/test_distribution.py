@@ -86,6 +86,7 @@ def test_tost_matches_toster_raw_bounds() -> None:
             "low": -1.5,
             "high": 1.5,
             "var_equal": True,
+            "alpha": 0.05,
             "nan_policy": "omit",
         },
         df,
@@ -122,3 +123,68 @@ def test_runs_test_detects_nonrandom_sequences() -> None:
     assert a.statistic > 0 and a.p_value is not None and a.p_value < 0.01
     with pytest.raises(ValueError, match="both sides"):
         dist.runs_test(pd.DataFrame({"x": [1.0] * 10}), "x")
+
+
+# --------------------------------------------------------------------------
+# M3.4: tost_equivalence's 1 - 2*alpha intervals (Section 16's M3 criterion)
+# --------------------------------------------------------------------------
+
+
+def test_tost_reports_toster_1_minus_2_alpha_intervals() -> None:
+    """TOSTER's own primary interval is at 1 - 2*alpha, the level at which
+    "the interval lies inside the bounds" and "both one-sided tests reject"
+    are the same statement -- so ci_level is 0.90 at alpha=0.05, for the
+    raw difference and for Hedges' g alike."""
+    t = data("tost_equivalence_data")
+    df = pd.DataFrame({"v": list(t.x) + list(t.y), "g": ["a"] * len(t) + ["b"] * len(t)})
+    r = ref("tost_equivalence_ci__tost_equivalence_data")
+    result = dist.tost_equivalence(df, "v", "g", low=-1.5, high=1.5, var_equal=True)
+
+    assert result.ci_level == pytest.approx(r["conf_level"])
+    assert result.estimate == pytest.approx(r["estimate_raw"], abs=1e-9)
+    assert result.ci is not None
+    assert result.ci[0] == pytest.approx(r["ci_low_raw"], abs=1e-9)
+    assert result.ci[1] == pytest.approx(r["ci_high_raw"], abs=1e-9)
+
+    assert result.effect_size_name == "hedges_g"
+    assert result.effect_size == pytest.approx(r["hedges_g"], abs=1e-9)
+    assert result.effect_size_ci is not None
+    assert result.effect_size_ci[0] == pytest.approx(r["hedges_g_ci_low"], abs=1e-6, rel=1e-6)
+    assert result.effect_size_ci[1] == pytest.approx(r["hedges_g_ci_high"], abs=1e-6, rel=1e-6)
+    # TOSTER's SMD row and effectsize::hedges_g(ci=1-2*alpha) agree, which
+    # is why the existing hedges_g machinery is reused here.
+    assert r["hedges_g"] == pytest.approx(r["hedges_g_effectsize"], abs=1e-9)
+
+
+def test_tost_welch_path_uses_the_average_variance_g() -> None:
+    """With var_equal=False the test drops the equal-variance assumption,
+    so its effect size must too (TOSTER labels this g(av))."""
+    t = data("tost_equivalence_data")
+    df = pd.DataFrame({"v": list(t.x) + list(t.y), "g": ["a"] * len(t) + ["b"] * len(t)})
+    result = dist.tost_equivalence(df, "v", "g", low=-1.5, high=1.5)
+    assert result.effect_size_name == "hedges_g_av"
+    assert result.effect_size_ci is not None
+
+
+def test_tost_alpha_widens_the_interval_and_is_validated() -> None:
+    t = data("tost_equivalence_data")
+    df = pd.DataFrame({"v": list(t.x) + list(t.y), "g": ["a"] * len(t) + ["b"] * len(t)})
+    narrow = dist.tost_equivalence(df, "v", "g", low=-1.5, high=1.5, alpha=0.05)
+    wide = dist.tost_equivalence(df, "v", "g", low=-1.5, high=1.5, alpha=0.01)
+    assert narrow.ci is not None and wide.ci is not None
+    assert wide.ci[0] < narrow.ci[0] and wide.ci[1] > narrow.ci[1]
+    assert wide.ci_level == pytest.approx(0.98)
+    with pytest.raises(ValueError, match="alpha must be"):
+        dist.tost_equivalence(df, "v", "g", low=-1.5, high=1.5, alpha=0.6)
+
+
+def test_anderson_ksamp_and_runs_test_stay_exempt() -> None:
+    """Documented exemptions (docs/m3_effect_size_audit.md): a
+    distribution-equality test and a randomness test have no standard
+    effect size."""
+    ad = dist.anderson_ksamp(data("anderson_ksamp_data"), "value", "group")
+    runs = dist.runs_test(data("runs_test_data"), "x")
+    for result in (ad, runs):
+        assert result.effect_size is None
+        assert result.effect_size_name is None
+        assert result.effect_size_ci is None

@@ -42,7 +42,11 @@ def test_spearman_exact_matches_r_small_n_no_ties() -> None:
     assert res.p_value == pytest.approx(r["p_value"], rel=1e-9)
     assert any("exact" in w for w in res.warnings)
     assert_codegen_matches(
-        registry, "spearman", {"x": "x", "y": "y", "nan_policy": "omit"}, df, namespace=_NS
+        registry,
+        "spearman",
+        {"x": "x", "y": "y", "ci": 0.95, "nan_policy": "omit"},
+        df,
+        namespace=_NS,
     )
 
 
@@ -90,7 +94,11 @@ def test_kendall_tau_b_with_ties_matches_r() -> None:
     assert res.statistic == pytest.approx(r["statistic"], rel=1e-9)  # z
     assert res.p_value == pytest.approx(r["p_value"], rel=1e-9)
     assert_codegen_matches(
-        registry, "kendall_tau", {"x": "x", "y": "y", "nan_policy": "omit"}, df, namespace=_NS
+        registry,
+        "kendall_tau",
+        {"x": "x", "y": "y", "ci": 0.95, "nan_policy": "omit"},
+        df,
+        namespace=_NS,
     )
 
 
@@ -132,7 +140,7 @@ def test_partial_correlation_matches_ppcor() -> None:
     assert_codegen_matches(
         registry,
         "partial_correlation",
-        {"x": "x", "y": "y", "covars": ["z"], "nan_policy": "omit"},
+        {"x": "x", "y": "y", "covars": ["z"], "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NS,
     )
@@ -243,3 +251,152 @@ def test_correlation_matrix_matches_pairwise_and_adjusts_within_family() -> None
         df,
         namespace=_NS,
     )
+
+
+# --------------------------------------------------------------------------
+# M3.4: correlation effect sizes and their CIs (Section 16's M3 criterion)
+# --------------------------------------------------------------------------
+
+
+def test_pearson_and_point_biserial_report_r_as_the_effect_size() -> None:
+    """r IS the effect size for a correlation, so effect_size mirrors
+    estimate and shares its Fisher-z interval -- not a second, different
+    interval."""
+    df = data("correlation_small_no_ties")
+    result = cor.pearson(df, "x", "y")
+    assert result.effect_size_name == "pearson_r"
+    assert result.effect_size == result.estimate
+    assert result.effect_size_ci == result.ci
+
+    binary_df = pd.DataFrame({"g": [0, 0, 1, 1, 0, 1, 1, 0], "v": list(df["y"])})
+    pb = cor.point_biserial(binary_df, "g", "v")
+    assert pb.effect_size_name == "point_biserial_r"
+    assert pb.effect_size == pb.estimate
+    assert pb.effect_size_ci == pb.ci
+
+
+@pytest.mark.parametrize(
+    ("fixture", "dataset"),
+    [
+        ("spearman_ci__correlation_small_no_ties", "correlation_small_no_ties"),
+        ("spearman_ci__rank_corr_n100", "rank_corr_n100"),
+    ],
+)
+def test_spearman_ci_matches_desctools(fixture: str, dataset: str) -> None:
+    """R's cor.test gives no CI for rho; DescTools::SpearmanRho is the
+    reference (Fisher z with SE = 1/sqrt(n - 3)). Two sample sizes, because
+    the SE is the only place n enters."""
+    r = ref(fixture)
+    result = cor.spearman(data(dataset), "x", "y")
+    assert result.effect_size_name == "spearman_rho"
+    assert result.effect_size == pytest.approx(r["estimate"], abs=1e-9)
+    assert result.effect_size_ci is not None
+    assert result.effect_size_ci[0] == pytest.approx(r["ci_low"], abs=1e-9)
+    assert result.effect_size_ci[1] == pytest.approx(r["ci_high"], abs=1e-9)
+    assert result.effect_size_ci == result.ci
+
+
+@pytest.mark.parametrize(
+    ("fixture", "dataset"),
+    [
+        ("kendall_tau_ci__correlation_with_ties", "correlation_with_ties"),
+        ("kendall_tau_ci__rank_corr_n20", "rank_corr_n20"),
+    ],
+)
+def test_kendall_tau_ci_matches_desctools(fixture: str, dataset: str) -> None:
+    """DescTools::KendallTauB's delta-method interval, which (unlike a
+    Fisher-z one) accounts for ties. Both a tied table and continuous
+    tie-free data, since the latter drives the contingency table to n x n
+    and exercises the cumulative-sum path in `_con_dis_pairs`."""
+    r = ref(fixture)
+    result = cor.kendall_tau(data(dataset), "x", "y")
+    assert result.effect_size_name == "kendall_tau_b"
+    assert result.effect_size == pytest.approx(r["estimate"], abs=1e-9)
+    assert result.effect_size_ci is not None
+    assert result.effect_size_ci[0] == pytest.approx(r["ci_low"], abs=1e-9)
+    assert result.effect_size_ci[1] == pytest.approx(r["ci_high"], abs=1e-9)
+
+
+def test_kendall_tau_ci_is_not_a_fisher_z_interval() -> None:
+    """Guards the specific shortcut this could have been implemented as:
+    with ties, the delta-method SE and a Fisher-z SE disagree materially."""
+    r = ref("kendall_tau_ci__correlation_with_ties")
+    df = data("correlation_with_ties")
+    n = len(df)
+    tau = r["estimate"]
+    fisher_low = np.tanh(np.arctanh(tau) - 1.959963984540054 / np.sqrt(n - 3))
+    assert fisher_low != pytest.approx(r["ci_low"], abs=1e-3)
+
+
+def test_partial_correlation_ci_matches_fisher_z_with_n_minus_k_minus_3() -> None:
+    """No installed R package reports a CI for a partial correlation, so
+    the fixture evaluates the same published Fisher-z formula in R (see the
+    M3.4 section of scripts/generate_r_fixtures.R and ARCHITECTURE.md
+    Section 18). What this test does establish independently: the df used
+    is n - k - 3, not n - 3."""
+    r = ref("partial_correlation_ci__partial_correlation_data")
+    df = data("partial_correlation_data")
+    result = cor.partial_correlation(df, "x", "y", ["z"])
+    assert result.effect_size_name == "partial_r"
+    assert result.effect_size == pytest.approx(r["estimate"], abs=1e-9)
+    assert result.effect_size_ci is not None
+    assert result.effect_size_ci[0] == pytest.approx(r["ci_low"], abs=1e-9)
+    assert result.effect_size_ci[1] == pytest.approx(r["ci_high"], abs=1e-9)
+
+    rng = np.random.default_rng(0)
+    two_covars = cor.partial_correlation(
+        df.assign(z2=rng.normal(size=len(df))), "x", "y", ["z", "z2"]
+    )
+    assert two_covars.effect_size_ci is not None
+    assert two_covars.effect_size_ci[0] != pytest.approx(result.effect_size_ci[0], abs=1e-9)
+
+
+def test_distance_correlation_and_mutual_information_stay_exempt() -> None:
+    """Documented exemptions (docs/m3_effect_size_audit.md): dCor has no
+    analytic CI and a bootstrap of it is badly biased near 0; the KSG
+    mutual-information estimator has no standard CI at all."""
+    df = data("partial_correlation_data")
+    for result in (
+        cor.distance_correlation(df, "x", "y", n_resamples=50),
+        cor.mutual_information(df, "x", "y"),
+    ):
+        assert result.estimate is not None
+        assert result.effect_size_ci is None
+
+
+def test_kendall_tau_b_from_the_table_agrees_with_scipys_rank_formula() -> None:
+    """Two independent routes to tau-b: scipy's rank-based formula (which
+    drives the p-value) and the concordant/discordant counts read off the
+    contingency table (which drives the CI). If they disagree, the table
+    construction in `_kendall_concordance_excess` is wrong."""
+    for dataset in ("correlation_with_ties", "rank_corr_n20", "rank_corr_n49"):
+        df = data(dataset)
+        x, y = df["x"].to_numpy(), df["y"].to_numpy()
+        from_table = cor._kendall_tau_b_from_table(x, y)
+        assert from_table == pytest.approx(stats.kendalltau(x, y, variant="b").statistic, abs=1e-12)
+
+
+def test_kendall_tau_ci_falls_back_to_fisher_z_on_a_table_too_large_to_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The delta-method table is (distinct x) x (distinct y), so tie-free
+    continuous data makes it n x n. Past the cap the CI degrades to a
+    Fisher-z interval and says so, rather than trying to allocate it."""
+    df = data("rank_corr_n20")
+    full = cor.kendall_tau(df, "x", "y")
+    monkeypatch.setattr(cor, "MAX_KENDALL_TABLE_CELLS", 10)
+    degraded = cor.kendall_tau(df, "x", "y")
+
+    assert degraded.estimate == full.estimate
+    assert degraded.p_value == full.p_value
+    assert degraded.effect_size_ci != full.effect_size_ci
+    assert any("Fisher-z approximation" in w for w in degraded.warnings)
+    assert not any("Fisher-z approximation" in w for w in full.warnings)
+
+    n = len(df)
+    expected = np.tanh(
+        np.arctanh(full.estimate) + np.array([-1, 1]) * stats.norm.ppf(0.975) / np.sqrt(n - 3)
+    )
+    assert degraded.effect_size_ci is not None
+    assert degraded.effect_size_ci[0] == pytest.approx(expected[0])
+    assert degraded.effect_size_ci[1] == pytest.approx(expected[1])

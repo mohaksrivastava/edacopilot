@@ -169,7 +169,7 @@ def test_mann_whitney_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "mann_whitney",
-        {"group_col": "group", "value_col": "value", "nan_policy": "omit"},
+        {"group_col": "group", "value_col": "value", "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NAMESPACE,
     )
@@ -187,7 +187,7 @@ def test_brunner_munzel_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "brunner_munzel",
-        {"group_col": "group", "value_col": "value", "nan_policy": "omit"},
+        {"group_col": "group", "value_col": "value", "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NAMESPACE,
     )
@@ -278,6 +278,8 @@ def test_permutation_test_2s_matches_r_exact_fixture() -> None:
             "group_col": "group",
             "value_col": "value",
             "n_resamples": 500,
+            "ci": 0.95,
+            "n_boot": 200,
             "random_state": 0,
             "nan_policy": "omit",
         },
@@ -355,7 +357,7 @@ def test_wilcoxon_signed_rank_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "wilcoxon_signed_rank",
-        {"a": "after", "b": "before", "nan_policy": "omit"},
+        {"a": "after", "b": "before", "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NAMESPACE,
     )
@@ -372,7 +374,7 @@ def test_sign_test_paired_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "sign_test_paired",
-        {"a": "after", "b": "before", "nan_policy": "omit"},
+        {"a": "after", "b": "before", "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NAMESPACE,
     )
@@ -417,7 +419,15 @@ def test_permutation_test_paired_matches_r_exact_fixture() -> None:
     assert_codegen_matches(
         registry,
         "permutation_test_paired",
-        {"a": "after", "b": "before", "n_resamples": 500, "random_state": 0, "nan_policy": "omit"},
+        {
+            "a": "after",
+            "b": "before",
+            "n_resamples": 500,
+            "ci": 0.95,
+            "n_boot": 200,
+            "random_state": 0,
+            "nan_policy": "omit",
+        },
         df,
         namespace=_NAMESPACE,
     )
@@ -446,3 +456,132 @@ def test_permutation_test_paired_uses_monte_carlo_above_threshold() -> None:
     assert n_arrangements_paired(20) > MAX_EXACT_PERMUTATIONS
     result = edacore.stattests.two_sample.permutation_test_paired(df, "a", "b", n_resamples=1000)
     assert any("monte_carlo" in w for w in result.warnings)
+
+
+# --------------------------------------------------------------------------
+# M3.4: effect size + CI on every two-sample test (Section 16's M3 criterion)
+# --------------------------------------------------------------------------
+
+
+def _assert_effect_ci(result: Any, ref: dict[str, Any], name: str) -> None:
+    assert result.effect_size_name == name
+    _close(result.effect_size, ref["estimate"])
+    assert result.effect_size_ci is not None
+    _close(result.effect_size_ci[0], ref["ci_low"])
+    _close(result.effect_size_ci[1], ref["ci_high"])
+
+
+def test_student_t_reports_hedges_g_not_cohens_d() -> None:
+    """Section 6.7 specifies Hedges' g. Up to M3.3 this returned Cohen's d
+    under the name `cohens_d`; the two differ by the exact J correction."""
+    df = _data("two_groups_equal_var")
+    ref = _ref("hedges_g__two_groups_equal_var")
+    result = edacore.stattests.two_sample.student_t(df, "group", "value")
+    _assert_effect_ci(result, ref, "hedges_g")
+    d = edacore.effect_sizes.cohens_d(df, "value", "group", ("A", "B"))
+    assert result.effect_size != pytest.approx(d["estimate"], abs=1e-9)
+
+
+def test_welch_t_reports_hedges_g_av_with_ci() -> None:
+    """Up to M3.3 welch_t's effect size was labelled hedges_g but held
+    Cohen's d(av): the right denominator, no J correction, no CI."""
+    df = _data("two_groups_unequal_var")
+    ref = _ref("hedges_g_av__two_groups_unequal_var")
+    result = edacore.stattests.two_sample.welch_t(df, "group", "value")
+    _assert_effect_ci(result, ref, "hedges_g_av")
+    x = df.loc[df["group"] == "A", "value"].to_numpy()
+    y = df.loc[df["group"] == "B", "value"].to_numpy()
+    uncorrected_d_av = (x.mean() - y.mean()) / np.sqrt((x.var(ddof=1) + y.var(ddof=1)) / 2)
+    assert result.effect_size != pytest.approx(uncorrected_d_av, abs=1e-9)
+
+
+def test_yuen_trimmed_t_effect_size_is_the_trimmed_mean_difference() -> None:
+    df = _data("two_groups_unequal_var")
+    ref = _ref("yuen_trimmed_t__two_groups_unequal_var")
+    result = edacore.stattests.two_sample.yuen_trimmed_t(df, "group", "value")
+    assert result.effect_size_name == "trimmed_mean_difference"
+    _close(result.effect_size, ref["estimate_diff"])
+    assert result.effect_size_ci is not None
+    _close(result.effect_size_ci[0], ref["ci_low"])
+    _close(result.effect_size_ci[1], ref["ci_high"])
+    # Unstandardized: no magnitude label (effect_sizes.UNLABELLED_MEASURES).
+    assert result.effect_magnitude is None
+
+
+def test_mann_whitney_effect_size_ci_matches_r() -> None:
+    ref = _ref("rank_biserial__two_groups_equal_var")
+    result = edacore.stattests.two_sample.mann_whitney(
+        _data("two_groups_equal_var"), "group", "value"
+    )
+    _assert_effect_ci(result, ref, "rank_biserial")
+
+
+def test_brunner_munzel_effect_size_ci_matches_r() -> None:
+    ref = _ref("brunner_munzel_ci__two_groups_equal_var")
+    result = edacore.stattests.two_sample.brunner_munzel(
+        _data("two_groups_equal_var"), "group", "value"
+    )
+    _assert_effect_ci(result, ref, "relative_effect")
+    assert result.effect_magnitude is None
+
+
+def test_paired_t_effect_size_ci_matches_r() -> None:
+    ref = _ref("d_z__paired_before_after")
+    result = edacore.stattests.two_sample.paired_t(_data("paired_before_after"), "after", "before")
+    _assert_effect_ci(result, ref, "d_z")
+
+
+def test_wilcoxon_signed_rank_effect_size_ci_matches_r_paired_se() -> None:
+    """The paired signed-rank SE, not Mann-Whitney's: checked by asserting
+    the interval differs from the independent-samples one on the same
+    numbers."""
+    df = _data("paired_before_after")
+    ref = _ref("rank_biserial_paired__paired_before_after")
+    result = edacore.stattests.two_sample.wilcoxon_signed_rank(df, "after", "before")
+    _assert_effect_ci(result, ref, "rank_biserial")
+    long = pd.DataFrame(
+        {
+            "value": list(df["after"]) + list(df["before"]),
+            "group": ["after"] * len(df) + ["before"] * len(df),
+        }
+    )
+    independent = edacore.effect_sizes.rank_biserial(long, "value", "group", ("after", "before"))
+    assert result.effect_size_ci[0] != pytest.approx(independent["ci_low"], abs=1e-9)
+
+
+def test_sign_test_paired_effect_size_ci_matches_r() -> None:
+    ref = _ref("sign_test_paired_ci__paired_before_after")
+    result = edacore.stattests.two_sample.sign_test_paired(
+        _data("paired_before_after"), "after", "before"
+    )
+    _assert_effect_ci(result, ref, "proportion")
+    assert result.ci == result.effect_size_ci
+
+
+@pytest.mark.parametrize("paired", [False, True])
+def test_permutation_tests_report_a_seeded_bootstrap_ci(paired: bool) -> None:
+    """A permutation test has no analytic interval, so Section 6.7's
+    "bootstrap if no analytic CI" rule applies. Not R-matchable (resampling
+    draws), so what is asserted is: an interval exists, it brackets the
+    observed difference, it is disclosed as a bootstrap, and the same seed
+    reproduces it exactly (rule 7)."""
+    if paired:
+        df = _data("permutation_paired_small")
+        call = lambda seed: edacore.stattests.two_sample.permutation_test_paired(  # noqa: E731
+            df, "after", "before", n_boot=300, random_state=seed
+        )
+    else:
+        df = _data("permutation_two_sample_small")
+        call = lambda seed: edacore.stattests.two_sample.permutation_test_2s(  # noqa: E731
+            df, "group", "value", n_boot=300, random_state=seed
+        )
+
+    result = call(0)
+    assert result.effect_size_name == "mean_difference"
+    assert result.effect_size == result.estimate
+    assert result.effect_size_ci is not None
+    low, high = result.effect_size_ci
+    assert low < result.estimate < high
+    assert any("BCa bootstrap" in w for w in result.warnings)
+    assert call(0).effect_size_ci == (low, high)
+    assert call(7).effect_size_ci != (low, high)

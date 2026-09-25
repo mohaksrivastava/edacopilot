@@ -616,6 +616,11 @@ Every check returns an `AssumptionCheck` with `status` and a one-sentence `conse
 
 ### 6.7 Hypothesis tests (`stattests/`) — stage `hypothesis`
 All return `TestResult` including effect size with CI (bootstrap if no analytic CI).
+Nine tests are exempt, each for a recorded reason (no standard effect size, or
+no standard CI for the one it has): see `docs/m3_effect_size_audit.md`, whose
+exemption list `tests/unit/edacore/test_m3_effect_size_criterion.py` enforces in
+CI — that test fails both if a non-exempt test loses its effect size or CI and
+if an exempt one gains one.
 
 **One sample**
 | Function | Hard assumptions | Soft | Persona | Effect size |
@@ -631,11 +636,11 @@ All return `TestResult` including effect size with CI (bootstrap if no analytic 
 | Function | Hard | Soft | Persona | Effect size |
 |---|---|---|---|---|
 | `student_t(outcome, group)` | numeric, independent, n ≥ 2 | normality, equal variance | P (only if both pass) | Hedges' g |
-| `welch_t(outcome, group)` | numeric, independent | normality or large n | P, C | Hedges' g |
+| `welch_t(outcome, group)` | numeric, independent | normality or large n | P, C | Hedges' g(av) (average-variance denominator, Welch df) |
 | `yuen_trimmed_t(outcome, group, trim=0.2)` | numeric, independent | — | M, P | trimmed mean difference; Wilcox–Tian ξ |
 | `mann_whitney(outcome, group)` | ordinal+, independent | same shape (for median interpretation) | P, C | rank-biserial, Cliff's δ |
-| `brunner_munzel(outcome, group)` | ordinal+, independent | — | M, P | stochastic superiority |
-| `permutation_test_2s(outcome, group, stat="mean_diff", n_perm=10000)` | independent, exchangeability | — | M | observed diff |
+| `brunner_munzel(outcome, group)` | ordinal+, independent | — | M, P | stochastic superiority (relative effect + its CI) |
+| `permutation_test_2s(outcome, group, stat="mean_diff", n_perm=10000)` | independent, exchangeability | — | M | observed diff (+ seeded BCa bootstrap CI) |
 | `bootstrap_diff(outcome, group, stat="mean"|"median")` | independent | — | M | CI of diff |
 | `ks_two_sample(outcome, group)` | continuous | — | M | D statistic |
 
@@ -645,7 +650,7 @@ All return `TestResult` including effect size with CI (bootstrap if no analytic 
 | `paired_t(a, b)` | paired numeric | normality of differences or large n | P, C | d_z |
 | `wilcoxon_signed_rank(a, b)` | paired ordinal+ | symmetry of differences | P, C | rank-biserial |
 | `sign_test_paired(a, b)` | paired ordinal | — | P | proportion |
-| `permutation_test_paired(a, b)` | paired | — | M | mean diff |
+| `permutation_test_paired(a, b)` | paired | — | M | mean diff (+ seeded BCa bootstrap CI over pairs) |
 
 **k independent groups** (+ post-hoc)
 | Function | Hard | Soft | Persona | Effect size | Post-hoc |
@@ -664,10 +669,10 @@ All return `TestResult` including effect size with CI (bootstrap if no analytic 
 | `cochran_q(dv, subject, within)` | binary | — | All | — | pairwise McNemar |
 
 **Factorial**
-| Function | Notes | Persona |
-|---|---|---|
-| `two_way_anova(outcome, factors, typ=2)` | Interaction test; typ=3 if unbalanced | P |
-| `aligned_rank_transform_anova(outcome, factors)` | Nonparametric factorial (ART) | M |
+| Function | Notes | Persona | Effect size |
+|---|---|---|---|
+| `two_way_anova(outcome, factors, typ=2)` | Interaction test; typ=3 if unbalanced | P | partial η² per term |
+| `aligned_rank_transform_anova(outcome, factors)` | Nonparametric factorial (ART) | M | partial η² per term, on the aligned-rank F |
 
 **Categorical association**
 | Function | Hard | Persona | Effect size |
@@ -675,11 +680,18 @@ All return `TestResult` including effect size with CI (bootstrap if no analytic 
 | `chi2_independence(a, b)` | expected counts OK | P, C | Cramér's V (bias-corrected) |
 | `fisher_exact(a, b)` | 2×2, or r×c (exact enumeration; seeded Monte Carlo above 2M tables) | P, C | odds ratio + CI (2×2 only) |
 | `g_test(a, b)` | expected counts OK | M | Cramér's V |
-| `mcnemar(a, b)` | paired binary | All | odds ratio |
+| `mcnemar(a, b)` | paired binary | All | odds ratio b01/b10 + exact conditional CI |
 | `two_proportion_z(outcome, group)` | binary, n·p ≥ 10 | C | risk difference, Cohen's h |
 | `cochran_armitage_trend(binary, ordinal)` | ordinal exposure | P, M | — |
 
 **Correlation**
+
+The coefficient *is* the effect size for every function here, so `effect_size`
+mirrors `estimate` and shares its interval. `cor.test` reports no CI for
+Spearman's rho or Kendall's tau; those follow `DescTools::SpearmanRho`
+(Fisher z, SE = 1/√(n−3)) and `DescTools::KendallTauB` (delta-method ASE from
+the joint table, which unlike Fisher z accounts for ties).
+
 | Function | Hard | Soft | Persona |
 |---|---|---|---|
 | `pearson(x, y)` | both continuous | linearity, bivariate normality (for CI), no influential outliers | P, C |
@@ -695,13 +707,13 @@ All return `TestResult` including effect size with CI (bootstrap if no analytic 
 | Function | Purpose | Persona |
 |---|---|---|
 | `anderson_ksamp(outcome, group)` | k-sample distribution comparison | M |
-| `tost_equivalence(outcome, group, low, high)` | Equivalence ("no meaningful difference") | P, M |
+| `tost_equivalence(outcome, group, low, high, alpha=0.05)` | Equivalence ("no meaningful difference"). Both intervals are at 1 − 2α (TOSTER's convention), with Hedges' g as the effect size | P, M |
 | `runs_test(col)` | Randomness of sequence | P |
 
 ### 6.8 Effect sizes, multiplicity, power
 | Module | Functions |
 |---|---|
-| `effect_sizes.py` | `cohens_d`, `hedges_g`, `glass_delta`, `d_z`, `rank_biserial`, `cliffs_delta`, `eta_squared`, `partial_eta_squared`, `omega_squared`, `epsilon_squared`, `kendalls_w`, `cramers_v(bias_correct=True)`, `phi`, `odds_ratio`, `risk_ratio`, `risk_difference`, `cohens_h`, `cohens_w`, `magnitude_label(value, measure)` (documented conventional thresholds, with a note that thresholds are field-dependent), `bootstrap_effect_ci(fn, ...)` |
+| `effect_sizes.py` | `cohens_d`, `hedges_g`, `glass_delta`, `d_z`, `rank_biserial`, `cliffs_delta`, `eta_squared`, `partial_eta_squared`, `omega_squared`, `epsilon_squared`, `kendalls_w`, `cramers_v(bias_correct=True)`, `phi`, `odds_ratio`, `risk_ratio`, `risk_difference`, `cohens_h`, `cohens_w`, `magnitude_label(value, measure)` (documented conventional thresholds, with a note that thresholds are field-dependent), `bootstrap_effect_ci(fn, ...)`. Added in M3.4 for the Section 6.7 tests that needed a differently parameterized version: `cohens_d_one_sample`, `hedges_g_av` (average-variance denominator, Welch df), `rank_biserial_one_sample`, `rank_biserial_paired` (signed-rank SE, not Mann-Whitney's), `cohens_h_one_sample` (exact, via the monotone arcsine transform of a Clopper-Pearson interval), `cohens_w_gof`; plus two unregistered conversions from already-computed test output, `partial_eta_squared_from_f` and `omega_squared_from_f`, and `UNLABELLED_MEASURES`, the set of effect sizes that deliberately carry no magnitude label |
 | `multiplicity.py` | `adjust_pvalues(pvals, method="holm"|"bonferroni"|"fdr_bh"|"fdr_by")` |
 | `power.py` | `required_sample_size(test, effect, alpha, power)`, `minimum_detectable_effect(test, n, alpha, power)`. **No post-hoc "observed power"** — it is a function of the p-value and misleading. |
 
@@ -1408,6 +1420,135 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-25 — M3.4 (tag `m3.4`)
+Closes M3's acceptance criterion (Section 16: "every test returns effect
+size + CI"), which the m3.3 audit found was met by only 9 of 45 test
+functions. All 27 gaps are fixed; the 9 exemptions from that audit stand.
+No new dependency, no version-floor change.
+
+- **The criterion is now enforced, not audited.**
+  `test_m3_effect_size_criterion.py` calls every registered `kind="test"`
+  function in stage `hypothesis` and asserts it returns an effect size,
+  a named measure, and a CI containing its own point estimate — or is on
+  an explicit exemption list with a reason. It fails both ways: a new
+  test function with no row in its call table fails, and an *exempt*
+  function that starts returning an effect size fails too (its exemption
+  would be stale). A companion test asserts the list matches
+  `docs/m3_effect_size_audit.md`, which was rewritten to record what each
+  test now returns and against which R function it is checked.
+- **welch_t reported the wrong number.** Its `effect_size_name` said
+  `hedges_g` but the value was Cohen's d(av): the right
+  (average-variance) denominator with no J small-sample correction. Now
+  `hedges_g_av`, matching `effectsize::hedges_g(pooled_sd=FALSE)` —
+  including the detail that both J and the noncentral-t interval use the
+  **Welch** df, not n1+n2-2.
+- **student_t returned Cohen's d** where Section 6.7 specifies Hedges' g.
+  Now g, with the CI `effect_sizes.hedges_g` already computed and had
+  verified against R since M2.1 but which nothing was wired to.
+- **Six new registered effect sizes** (Section 6.8), each a
+  parameterization Section 6.7's tests needed and each verified against a
+  new R fixture: `cohens_d_one_sample`, `hedges_g_av`,
+  `rank_biserial_one_sample`, `rank_biserial_paired`,
+  `cohens_h_one_sample`, `cohens_w_gof`. Two facts worth recording,
+  because guessing either would have produced a plausible-looking wrong
+  interval: the paired/one-sample rank-biserial SE is
+  `sqrt((2n^3+3n^2+n)/6)/(n(n+1)/2)`, *not* the Mann-Whitney SE already in
+  the module (a test asserts the two differ on the same data); and a
+  goodness-of-fit Cohen's w has upper bound `sqrt(1/min(p) - 1)`, not 1
+  and not `cohens_w`'s `sqrt(min(nrow, ncol) - 1)`.
+- **Exact intervals where an exact one exists.** `sign_test`,
+  `sign_test_paired` and `binomial_test` now use Clopper-Pearson rather
+  than a normal approximation; Cohen's h and the McNemar odds ratio are
+  strictly monotone transforms of a binomial proportion, so their
+  intervals are the transformed Clopper-Pearson bounds — exact, not
+  delta-method. base R reports no effect size for `mcnemar.test` at all,
+  so that construction (not an R function's output) is what the fixture
+  records, and `mcnemar` now returns no interval, with a warning, when
+  there are no discordant pairs.
+- **Kendall's tau-b CI is deliberately not a Fisher-z interval.**
+  `cor.test` reports no CI for tau or rho, so per your decision these
+  follow DescTools: `SpearmanRho` (Fisher z, SE = 1/sqrt(n-3)) and
+  `KendallTauB`, whose delta-method ASE is computed from the joint
+  contingency table and therefore accounts for ties. On the tied fixture
+  the two disagree materially; a test asserts that, so the shortcut
+  cannot creep back in. DescTools' `ConDisPairs` is O((r*c)^2), so it was
+  ported via one 2-D cumulative sum instead. That table is still
+  (distinct x) x (distinct y), i.e. n x n for tie-free continuous data, so
+  above `MAX_KENDALL_TABLE_CELLS` (4M cells, about n=2000 tie-free) the CI
+  degrades to a Fisher-z interval with a warning saying so — a table that
+  large has hardly any ties for the delta method to account for, which is
+  exactly when the two agree most closely. The estimate and p-value are
+  unaffected.
+- **Partial eta-squared per term** for `two_way_anova`,
+  `aligned_rank_transform_anova` and `repeated_measures_anova`, via
+  `effectsize::F_to_eta2` — which is what `effectsize::eta_squared`
+  itself computes for `car::Anova`, ARTool and afex objects (checked
+  directly, both routes agree). For repeated measures this settles a real
+  ambiguity: the sphericity correction changes the **test's** df, not the
+  effect size's, so the interval uses the uncorrected F and df while
+  `TestResult.df` stays GG-corrected. The fixture records both so the
+  Python test asserts the identity rather than assuming it.
+- **Two fixtures were added purely because the existing ones were
+  vacuous.** `k_groups_unequal_var` has Welch F < 1 and
+  `repeated_measures_wide` has RM F < 1, so omega^2 and partial eta^2 are
+  both 0 with interval [0, 1] — true, and passable by almost any
+  implementation. `k_groups_unequal_var_effect` and
+  `repeated_measures_effect_long` have a real effect, so the lower bound
+  is strictly positive and the noncentral-F inversion is actually tested.
+  Both the null and the effect case are now asserted.
+- **tost_equivalence reports at 1 - 2*alpha**, with a new `alpha`
+  parameter. That is TOSTER's own convention and the level at which "the
+  interval lies inside the bounds" and "both one-sided tests reject" are
+  the same statement; reporting a 95% interval next to a 5% TOST decision
+  would invite exactly the misreading this tool exists to prevent. Its
+  SMD is Hedges' g — pooled or average-variance, following `var_equal`,
+  so a Welch-based TOST does not smuggle the equal-variance assumption
+  back in through its effect size. TOSTER's own SMD row and
+  `effectsize::hedges_g(ci = 1 - 2*alpha)` agree exactly, which is why the
+  existing machinery is reused.
+- **Permutation tests get a seeded BCa bootstrap CI**, per Section 6.7's
+  "bootstrap if no analytic CI". Not R-matchable (resampling draws), so
+  what the tests assert is: the interval exists, brackets the observed
+  difference, is disclosed in `warnings`, and is reproduced exactly by the
+  same seed (rule 7). The paired version resamples **pairs**, never the
+  two columns independently.
+- **`_ncp_ci` no longer raises on a degenerate sample.** A zero
+  within-group SD makes the standardized effect size infinite and its
+  interval undefined; it now returns NaN bounds. Before M3.4 nothing
+  called it on such data, but wiring `d_z` into `paired_t` did, turning
+  "this sample has no variance" into a crash partway through an otherwise
+  valid result.
+- **Magnitude labels are now explicit both ways.** `UNLABELLED_MEASURES`
+  names the effect sizes that deliberately get no label — proportions,
+  raw and trimmed mean differences, odds ratios, the Brunner-Munzel
+  relative effect, mutual information, dCor — because calling a mean
+  difference "medium" without units is meaningless. A test asserts every
+  reported measure is either in the threshold table (and carries a label)
+  or in that set (and does not). Correlation thresholds use Cohen's r
+  conventions; `kendall_tau_b` shares them with a documented caveat that
+  tau is systematically smaller than r for the same association, so the
+  label understates it.
+- **One interval has no independent reference**, and is flagged as such
+  in the audit and in the code: no installed R package reports a CI for a
+  partial correlation, so the fixture evaluates the same published
+  Fisher-z formula in R that Python implements. That checks the
+  arithmetic, not the method. The Python test does independently
+  establish that the df is n - k - 3 and responds to the number of
+  controlled variables.
+- **Signature changes** (all additive, all with defaults, so existing
+  call sites are unaffected): `ci` added to `wilcoxon_one_sample`,
+  `sign_test`, `chi2_goodness_of_fit`, `mann_whitney`, `brunner_munzel`,
+  `wilcoxon_signed_rank`, `sign_test_paired`, `welch_anova`,
+  `repeated_measures_anova`, `two_way_anova`,
+  `aligned_rank_transform_anova`, `spearman`, `kendall_tau`,
+  `partial_correlation`, `mcnemar`; `ci_level` to `fisher_exact` (`ci` is
+  already its returned interval); `ci` + `n_boot` to both permutation
+  tests; `alpha` to `tost_equivalence`.
+- **Tests**: 435 passing, up from 298, on Python 3.11. 23 new R fixtures;
+  `git diff tests/fixtures` confirmed no existing fixture changed (the
+  new R section is appended last and either reuses objects already built
+  or sets its own seed).
 
 ### 2026-09-24 — M3.3 (tag `m3.3`)
 Pre-M4 fixes. Development moved to WSL2 (Python 3.11 venv `.venv-wsl`,

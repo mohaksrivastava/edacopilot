@@ -48,7 +48,13 @@ from scipy.special import gammaln
 from scipy.stats.contingency import odds_ratio as _scipy_odds_ratio
 
 from edacore.contracts import TestResult
-from edacore.effect_sizes import cohens_h, cramers_v, magnitude_label, risk_difference
+from edacore.effect_sizes import (
+    _clopper_pearson_ci,
+    cohens_h,
+    cramers_v,
+    magnitude_label,
+    risk_difference,
+)
 from edacore.registry import register
 from edacore.stattests._shared import NanPolicy
 
@@ -168,11 +174,17 @@ def _fisher_rxc_exact_p(table: np.ndarray) -> float | None:
     estimand="association between two categorical variables",
     code_template=(
         "edacore.stattests.categorical.fisher_exact("
-        "{df}, a={a!r}, b={b!r}, random_state={random_state}, nan_policy={nan_policy!r})"
+        "{df}, a={a!r}, b={b!r}, ci_level={ci_level}, random_state={random_state}, "
+        "nan_policy={nan_policy!r})"
     ),
 )
 def fisher_exact(
-    df: pd.DataFrame, a: str, b: str, random_state: int = 0, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame,
+    a: str,
+    b: str,
+    ci_level: float = 0.95,
+    random_state: int = 0,
+    nan_policy: NanPolicy = "omit",
 ) -> TestResult:
     """For a 2x2 table: reports the conditional MLE odds ratio (matching
     R's fisher.test) with its exact CI. For r x c: exact p-value by full
@@ -192,7 +204,7 @@ def fisher_exact(
         or_result = _scipy_odds_ratio(arr, kind="conditional")
         estimate = float(or_result.statistic)
         effect_size_name = "odds_ratio_conditional_mle"
-        low, high = or_result.confidence_interval(0.95)
+        low, high = or_result.confidence_interval(ci_level)
         ci = (float(low), float(high))
     elif min(arr.shape) < 2:
         p_value = 1.0  # only one table has these margins
@@ -222,8 +234,13 @@ def fisher_exact(
         p_value=p_value,
         estimate=estimate,
         ci=ci,
+        ci_level=ci_level,
         effect_size=estimate,
         effect_size_name=effect_size_name,
+        # The conditional-MLE odds ratio IS the effect size, so it shares
+        # the estimate's exact interval (2x2 only; an r x c Fisher test has
+        # no odds ratio -- see docs/m3_effect_size_audit.md).
+        effect_size_ci=ci,
         n={"total": len(clean)},
         warnings=warnings,
     )
@@ -300,10 +317,20 @@ def g_test(
     assumptions={"hard": ["paired_binary"], "soft": []},
     estimand="change in a paired binary outcome",
     code_template=(
-        "edacore.stattests.categorical.mcnemar({df}, a={a!r}, b={b!r}, nan_policy={nan_policy!r})"
+        "edacore.stattests.categorical.mcnemar("
+        "{df}, a={a!r}, b={b!r}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
-def mcnemar(df: pd.DataFrame, a: str, b: str, nan_policy: NanPolicy = "omit") -> TestResult:
+def mcnemar(
+    df: pd.DataFrame, a: str, b: str, ci: float = 0.95, nan_policy: NanPolicy = "omit"
+) -> TestResult:
+    """The odds ratio b01/b10 is a strictly increasing transform
+    p/(1 - p) of the binomial proportion b01/(b01 + b10), so the exact
+    (Clopper-Pearson) interval for that proportion maps bound-for-bound
+    onto an exact conditional interval for the odds ratio -- no normal
+    approximation. base R's mcnemar.test reports no effect size at all,
+    so this construction (not an R function's own output) is what the
+    fixture records."""
     warnings: list[str] = []
     clean = _clean_pair(df, a, b, nan_policy, warnings)
     table = pd.crosstab(clean[a], clean[b]).reindex(index=[0, 1], columns=[0, 1], fill_value=0)
@@ -322,6 +349,15 @@ def mcnemar(df: pd.DataFrame, a: str, b: str, nan_policy: NanPolicy = "omit") ->
         statistic = float((abs(b01 - b10) - 1) ** 2 / n_disc)
         p_value = float(stats.chi2.sf(statistic, 1))
     odds_ratio = float(b01 / b10) if b10 > 0 else float("inf")
+    if n_disc > 0:
+        p_low, p_high = _clopper_pearson_ci(b01, n_disc, ci)
+        or_ci: tuple[float, float] | None = (
+            p_low / (1 - p_low) if p_low < 1 else float("inf"),
+            p_high / (1 - p_high) if p_high < 1 else float("inf"),
+        )
+    else:
+        or_ci = None
+        warnings.append("no discordant pairs: the odds ratio is undefined")
 
     return TestResult(
         fact_id=f"mcnemar.{a}.{b}",
@@ -331,8 +367,12 @@ def mcnemar(df: pd.DataFrame, a: str, b: str, nan_policy: NanPolicy = "omit") ->
         statistic_name="chi2",
         df=1.0,
         p_value=p_value,
+        # An odds ratio has no Cohen-style magnitude convention (see
+        # effect_sizes.UNLABELLED_MEASURES), so no effect_magnitude.
         effect_size=odds_ratio,
         effect_size_name="odds_ratio",
+        effect_size_ci=or_ci,
+        ci_level=ci,
         n={"total": len(clean)},
         warnings=warnings,
     )

@@ -1,0 +1,1 @@
+{"r_function":"tanh(atanh(r) +/- qnorm(0.975)/sqrt(n - k - 3)) (no R package reports this)","data":"partial_correlation_data.csv","estimate":-0.1626952463423365,"ci_low":-0.4994210787517587,"ci_high":0.2167340053176237}

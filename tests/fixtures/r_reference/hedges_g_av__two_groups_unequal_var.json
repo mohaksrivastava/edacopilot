@@ -1,0 +1,1 @@
+{"r_function":"effectsize::hedges_g(pooled_sd=FALSE)","data":"two_groups_unequal_var.csv","estimate":-0.07488759022626387,"ci_low":-0.5052866765239382,"ci_high":0.3563808881922816}

@@ -48,7 +48,13 @@ def test_fisher_exact_2x2_matches_r_conditional_mle() -> None:
     assert_codegen_matches(
         registry,
         "fisher_exact",
-        {"a": "exposure", "b": "outcome", "random_state": 0, "nan_policy": "omit"},
+        {
+            "a": "exposure",
+            "b": "outcome",
+            "ci_level": 0.95,
+            "random_state": 0,
+            "nan_policy": "omit",
+        },
         df,
         namespace=_NS,
     )
@@ -64,7 +70,7 @@ def test_fisher_exact_rxc_matches_r_exact_and_is_deterministic() -> None:
     assert_codegen_matches(
         registry,
         "fisher_exact",
-        {"a": "row", "b": "col", "random_state": 0, "nan_policy": "omit"},
+        {"a": "row", "b": "col", "ci_level": 0.95, "random_state": 0, "nan_policy": "omit"},
         df,
         namespace=_NS,
     )
@@ -158,7 +164,11 @@ def test_mcnemar_matches_r_symmetric_table_edge_case() -> None:
     assert res.statistic == r["statistic"] == 0
     assert res.p_value == r["p_value"] == 1
     assert_codegen_matches(
-        registry, "mcnemar", {"a": "before", "b": "after", "nan_policy": "omit"}, df, namespace=_NS
+        registry,
+        "mcnemar",
+        {"a": "before", "b": "after", "ci": 0.95, "nan_policy": "omit"},
+        df,
+        namespace=_NS,
     )
 
 
@@ -168,3 +178,64 @@ def test_mcnemar_asymmetric_matches_r_reference_formula() -> None:
     res = cat.mcnemar(data("cochran_q_binary"), "t1", "t2")
     assert res.statistic == pytest.approx(r["statistic"][0], rel=1e-9)
     assert res.p_value == pytest.approx(r["p_unadj"][0], rel=1e-9)
+
+
+# --------------------------------------------------------------------------
+# M3.4: mcnemar's odds-ratio CI and fisher_exact's wired effect_size_ci
+# --------------------------------------------------------------------------
+
+
+def test_mcnemar_odds_ratio_ci_matches_r_exact_conditional() -> None:
+    """Asymmetric off-diagonal counts, so an inverted b01/b10 would fail.
+    base R's mcnemar.test reports no effect size, so the reference is the
+    p/(1-p) transform of binom.test's exact interval (see the M3.4 section
+    of scripts/generate_r_fixtures.R)."""
+    df = data("cochran_q_binary")
+    r = ref("mcnemar_or_ci__cochran_q_binary_t1_t2")
+    result = cat.mcnemar(df, "t1", "t2")
+    assert result.statistic == pytest.approx(r["statistic"], abs=1e-6)
+    assert result.p_value == pytest.approx(r["p_value"], abs=1e-6)
+    assert result.effect_size_name == "odds_ratio"
+    assert result.effect_size == pytest.approx(r["estimate"], abs=1e-6)
+    assert result.effect_size_ci is not None
+    assert result.effect_size_ci[0] == pytest.approx(r["ci_low"], abs=1e-6, rel=1e-6)
+    assert result.effect_size_ci[1] == pytest.approx(r["ci_high"], abs=1e-6, rel=1e-6)
+    # An odds ratio has no Cohen-style magnitude convention.
+    assert result.effect_magnitude is None
+    assert r["b01"] != r["b10"]
+
+
+def test_mcnemar_odds_ratio_ci_on_a_symmetric_table() -> None:
+    df = data("paired_binary")
+    r = ref("mcnemar_or_ci__paired_binary")
+    result = cat.mcnemar(df, "before", "after")
+    assert result.effect_size == pytest.approx(r["estimate"])
+    assert result.effect_size_ci is not None
+    assert result.effect_size_ci[0] == pytest.approx(r["ci_low"], rel=1e-9)
+    assert result.effect_size_ci[1] == pytest.approx(r["ci_high"], rel=1e-9)
+
+
+def test_mcnemar_odds_ratio_undefined_without_discordant_pairs() -> None:
+    df = pd.DataFrame({"a": [0, 1, 0, 1], "b": [0, 1, 0, 1]})
+    result = cat.mcnemar(df, "a", "b")
+    assert result.effect_size_ci is None
+    assert any("no discordant pairs" in w for w in result.warnings)
+
+
+def test_fisher_exact_2x2_effect_size_ci_is_the_odds_ratio_interval() -> None:
+    df = expanded("contingency_2x2")
+    r = ref("fisher_exact__contingency_2x2")
+    result = cat.fisher_exact(df, "exposure", "outcome")
+    assert result.effect_size_ci == result.ci
+    assert result.effect_size_ci is not None
+    assert result.effect_size_ci[0] == pytest.approx(r["ci_low"], rel=1e-4)
+    assert result.effect_size_ci[1] == pytest.approx(r["ci_high"], rel=1e-4)
+
+
+def test_fisher_exact_rxc_has_no_effect_size() -> None:
+    """Documented exemption (docs/m3_effect_size_audit.md): there is no
+    odds ratio beyond a 2x2 table."""
+    result = cat.fisher_exact(expanded("contingency_3x3"), "row", "col")
+    assert result.effect_size is None
+    assert result.effect_size_name is None
+    assert result.effect_size_ci is None

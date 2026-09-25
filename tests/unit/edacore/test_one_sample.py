@@ -100,7 +100,7 @@ def test_wilcoxon_one_sample_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "wilcoxon_one_sample",
-        {"col": "x", "mu0": ref["mu0"], "nan_policy": "omit"},
+        {"col": "x", "mu0": ref["mu0"], "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NAMESPACE,
     )
@@ -129,7 +129,7 @@ def test_sign_test_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "sign_test",
-        {"col": "x", "mu0": ref["mu0"], "nan_policy": "omit"},
+        {"col": "x", "mu0": ref["mu0"], "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NAMESPACE,
     )
@@ -191,7 +191,7 @@ def test_chi2_goodness_of_fit_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "chi2_goodness_of_fit",
-        {"col": "category", "expected": expected},
+        {"col": "category", "expected": expected, "ci": 0.95},
         df,
         namespace=_NAMESPACE,
     )
@@ -246,3 +246,55 @@ def test_chi2_goodness_of_fit_rejects_proportions_not_summing_to_one() -> None:
     df = pd.DataFrame({"c": ["a", "b", "b", "c"]})
     with pytest.raises(ValueError, match="must sum to 1"):
         edacore.stattests.one_sample.chi2_goodness_of_fit(df, "c", {"a": 1, "b": 1, "c": 1})
+
+
+# --------------------------------------------------------------------------
+# M3.4: effect size + CI on every one-sample test (Section 16's M3 criterion)
+# --------------------------------------------------------------------------
+
+
+def _assert_effect_ci(result: Any, ref: dict[str, Any], name: str) -> None:
+    assert result.effect_size_name == name
+    _close(result.effect_size, ref["estimate"])
+    assert result.effect_size_ci is not None
+    _close(result.effect_size_ci[0], ref["ci_low"])
+    _close(result.effect_size_ci[1], ref["ci_high"])
+
+
+def test_one_sample_t_effect_size_ci_matches_r() -> None:
+    ref = _ref("cohens_d_one_sample__normal_sample")
+    result = edacore.stattests.one_sample.one_sample_t(_data("normal_sample"), "x", ref["mu0"])
+    _assert_effect_ci(result, ref, "cohens_d")
+
+
+def test_wilcoxon_one_sample_effect_size_ci_matches_r() -> None:
+    ref = _ref("rank_biserial_one_sample__normal_sample")
+    result = edacore.stattests.one_sample.wilcoxon_one_sample(
+        _data("normal_sample"), "x", ref["mu0"]
+    )
+    _assert_effect_ci(result, ref, "rank_biserial")
+
+
+def test_sign_test_effect_size_ci_matches_r_clopper_pearson() -> None:
+    ref = _ref("sign_test_ci__normal_sample")
+    result = edacore.stattests.one_sample.sign_test(_data("normal_sample"), "x", ref["mu0"])
+    _assert_effect_ci(result, ref, "proportion")
+    # The proportion IS the estimate, so both intervals are the same one.
+    assert result.ci == result.effect_size_ci
+    # An unstandardized proportion gets no Cohen-style magnitude label.
+    assert result.effect_magnitude is None
+
+
+def test_binomial_test_effect_size_ci_matches_r() -> None:
+    ref = _ref("cohens_h_one_sample__binary_sample")
+    result = edacore.stattests.one_sample.binomial_test(_data("binary_sample"), "x", ref["p0"])
+    _assert_effect_ci(result, ref, "cohens_h")
+
+
+def test_chi2_goodness_of_fit_effect_size_ci_matches_r() -> None:
+    counts = _data("category_counts")
+    ref = _ref("cohens_w_gof__category_counts")
+    df = pd.DataFrame({"category": counts["category"].repeat(counts["count"]).to_numpy()})
+    expected = dict(zip("ABCD", ref["expected_probs"], strict=True))
+    result = edacore.stattests.one_sample.chi2_goodness_of_fit(df, "category", expected)
+    _assert_effect_ci(result, ref, "cohens_w")

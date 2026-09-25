@@ -9,6 +9,11 @@ test_effect_size_ci_coverage.py (marked slow). cohens_w's CI formula is
 implemented and internally consistent (see module docstring) but not yet
 checked against a fixture: the M2 fixture generation never captured its
 CI. See ARCHITECTURE.md Section 18's M2.1 changelog entry.
+
+M3.4 added the six parameterizations Section 6.7's tests needed to return
+an effect size WITH a CI (one-sample d, g(av), one-sample/paired
+rank-biserial, one-sample h, goodness-of-fit w); each is checked against
+its own R fixture at the bottom of this file.
 """
 
 from __future__ import annotations
@@ -433,3 +438,129 @@ def test_bootstrap_effect_ci_reproducible_with_same_seed() -> None:
     ci1 = edacore.effect_sizes.bootstrap_effect_ci(_mean_diff, df, n_boot=200, random_state=0)
     ci2 = edacore.effect_sizes.bootstrap_effect_ci(_mean_diff, df, n_boot=200, random_state=0)
     assert ci1 == ci2
+
+
+# --------------------------------------------------------------------------
+# M3.4: the parameterizations Section 6.7's tests needed (docs/m3_effect_size_audit.md)
+# --------------------------------------------------------------------------
+
+
+def test_cohens_d_one_sample_matches_r() -> None:
+    df = _data("normal_sample")
+    ref = _ref("cohens_d_one_sample__normal_sample")
+    result = edacore.effect_sizes.cohens_d_one_sample(df, "x", ref["mu0"])
+    _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"])
+    _assert_close(result["ci_high"], ref["ci_high"])
+    assert_codegen_matches(
+        registry,
+        "cohens_d_one_sample",
+        {"col": "x", "mu0": ref["mu0"], "ci": 0.95},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_hedges_g_av_matches_r_pooled_sd_false() -> None:
+    """The average-variance denominator, not the pooled one: on
+    deliberately heteroscedastic data the two differ, and so do their
+    Welch-vs-pooled df, so this cannot pass by accident against
+    `hedges_g`."""
+    df = _data("two_groups_unequal_var")
+    ref = _ref("hedges_g_av__two_groups_unequal_var")
+    result = edacore.effect_sizes.hedges_g_av(df, "value", "group", ("A", "B"))
+    _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"])
+    _assert_close(result["ci_high"], ref["ci_high"])
+
+    pooled = edacore.effect_sizes.hedges_g(df, "value", "group", ("A", "B"))
+    assert result["estimate"] != pytest.approx(pooled["estimate"], abs=1e-9)
+    assert_codegen_matches(
+        registry,
+        "hedges_g_av",
+        {"outcome": "value", "group": "group", "groups": ("A", "B"), "ci": 0.95},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_rank_biserial_one_sample_matches_r() -> None:
+    df = _data("normal_sample")
+    ref = _ref("rank_biserial_one_sample__normal_sample")
+    result = edacore.effect_sizes.rank_biserial_one_sample(df, "x", ref["mu0"])
+    _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"])
+    _assert_close(result["ci_high"], ref["ci_high"])
+    assert_codegen_matches(
+        registry,
+        "rank_biserial_one_sample",
+        {"col": "x", "mu0": ref["mu0"], "ci": 0.95},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_rank_biserial_paired_matches_r() -> None:
+    """The paired standard error differs from the independent-samples one,
+    so the CI must NOT equal what `rank_biserial` would give."""
+    df = _data("paired_before_after")
+    ref = _ref("rank_biserial_paired__paired_before_after")
+    result = edacore.effect_sizes.rank_biserial_paired(df, "after", "before")
+    _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"])
+    _assert_close(result["ci_high"], ref["ci_high"])
+    assert_codegen_matches(
+        registry,
+        "rank_biserial_paired",
+        {"a": "after", "b": "before", "ci": 0.95},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_cohens_h_one_sample_matches_r_exact_transform() -> None:
+    df = _data("binary_sample")
+    ref = _ref("cohens_h_one_sample__binary_sample")
+    result = edacore.effect_sizes.cohens_h_one_sample(df, "x", ref["p0"])
+    _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"])
+    _assert_close(result["ci_high"], ref["ci_high"])
+    assert_codegen_matches(
+        registry,
+        "cohens_h_one_sample",
+        {"col": "x", "p0": ref["p0"], "ci": 0.95},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_cohens_w_gof_matches_r() -> None:
+    """ci_high is sqrt(1/min(p) - 1) -- the largest w THESE reference
+    proportions admit -- not 1 and not cohens_w's sqrt(min(r, c) - 1)."""
+    counts = _data("category_counts")
+    ref = _ref("cohens_w_gof__category_counts")
+    df = pd.DataFrame({"category": counts["category"].repeat(counts["count"]).to_numpy()})
+    expected = dict(zip("ABCD", ref["expected_probs"], strict=True))
+    result = edacore.effect_sizes.cohens_w_gof(df, "category", expected)
+    _assert_close(result["estimate"], ref["estimate"])
+    _assert_close(result["ci_low"], ref["ci_low"])
+    _assert_close(result["ci_high"], ref["ci_high"])
+    assert result["ci_high"] == pytest.approx(np.sqrt(1 / 0.2 - 1))
+    assert_codegen_matches(
+        registry,
+        "cohens_w_gof",
+        {"col": "category", "expected": expected, "ci": 0.95},
+        df,
+        namespace=_NAMESPACE,
+    )
+
+
+def test_ncp_ci_returns_nan_on_zero_variance_rather_than_raising() -> None:
+    """A zero within-pair SD makes the standardized effect size infinite
+    and its interval undefined; that must not crash an otherwise valid
+    test result (regression: M3.4 wired d_z's CI into paired_t, and
+    `_ncp_ci` used to raise "no sign change found" here)."""
+    df = pd.DataFrame({"a": [1.0, 2.0], "b": [1.5, 2.5]})
+    result = edacore.effect_sizes.d_z(df, "a", "b")
+    assert np.isinf(result["estimate"])
+    assert np.isnan(result["ci_low"]) and np.isnan(result["ci_high"])

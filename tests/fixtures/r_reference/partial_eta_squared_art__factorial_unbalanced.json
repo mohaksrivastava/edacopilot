@@ -1,0 +1,1 @@
+{"r_function":"effectsize::F_to_eta2 on ARTool::art + anova","data":"factorial_unbalanced.csv","terms":["factor_a","factor_b","factor_a:factor_b"],"estimate":[0.1443727726656632,0.7056488402319041,0.3784984451354954],"ci_low":[0,0.52504115189192,0.1369754034388367],"ci_high":[1,1,1]}

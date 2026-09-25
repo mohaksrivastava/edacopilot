@@ -1,0 +1,1 @@
+{"r_function":"stats::binom.test(...)$conf.int (Clopper-Pearson)","data":"paired_before_after.csv","estimate":0.8,"ci_low":0.6306211554775546,"ci_high":0.9155939838394356}

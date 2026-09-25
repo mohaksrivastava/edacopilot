@@ -93,7 +93,7 @@ def test_welch_anova_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "welch_anova",
-        {"outcome": "value", "group": "group", "nan_policy": "omit"},
+        {"outcome": "value", "group": "group", "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NAMESPACE,
     )
@@ -200,3 +200,35 @@ def test_one_way_anova_nan_policy_raise() -> None:
     df = pd.DataFrame({"value": [1.0, np.nan, 3.0], "group": ["A", "A", "B"]})
     with pytest.raises(ValueError, match="missing"):
         edacore.stattests.k_independent.one_way_anova(df, "value", "group", nan_policy="raise")
+
+
+# --------------------------------------------------------------------------
+# M3.4: welch_anova's omega-squared CI (Section 16's M3 criterion)
+# --------------------------------------------------------------------------
+
+
+def test_welch_anova_omega_squared_ci_matches_r() -> None:
+    """On a dataset with a real effect: k_groups_unequal_var has Welch
+    F < 1, making omega^2 = 0 and its interval [0, 1], which would pass
+    against almost anything."""
+    df = _data("k_groups_unequal_var_effect")
+    ref = _ref("welch_anova__k_groups_unequal_var_effect")
+    result = edacore.stattests.k_independent.welch_anova(df, "value", "group")
+    _close(result.statistic, ref["statistic"])
+    _close(result.p_value, ref["p_value"])
+    assert result.effect_size_name == "omega_squared"
+    _close(result.effect_size, ref["omega_squared"])
+    assert result.effect_size_ci is not None
+    _close(result.effect_size_ci[0], ref["ci_low"])
+    _close(result.effect_size_ci[1], ref["ci_high"])
+    assert result.effect_size_ci[0] > 0
+
+
+def test_welch_anova_omega_squared_ci_is_zero_bounded_on_a_null_dataset() -> None:
+    """The other side of the same inversion: F < 1 gives omega^2 = 0 and a
+    lower bound pinned at 0, not a negative number."""
+    df = _data("k_groups_unequal_var")
+    ref = _ref("omega_squared_welch__k_groups_unequal_var")
+    result = edacore.stattests.k_independent.welch_anova(df, "value", "group")
+    _close(result.effect_size, ref["estimate"])
+    assert result.effect_size_ci == (ref["ci_low"], ref["ci_high"]) == (0.0, 1.0)

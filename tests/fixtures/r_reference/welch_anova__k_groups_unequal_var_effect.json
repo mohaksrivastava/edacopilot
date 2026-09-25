@@ -1,0 +1,1 @@
+{"r_function":"stats::oneway.test(var.equal=FALSE) + effectsize::omega_squared","data":"k_groups_unequal_var_effect.csv","statistic":17.559699838608733,"df1":2,"df2":30.572074282018086,"p_value":8.360293112288897e-06,"omega_squared":0.4966062033275999,"ci_low":0.2652379023828965,"ci_high":1}

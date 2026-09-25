@@ -34,6 +34,7 @@ import statsmodels.formula.api as smf
 from scipy import stats
 
 from edacore.contracts import TestResult
+from edacore.effect_sizes import magnitude_label, partial_eta_squared_from_f
 from edacore.registry import register
 from edacore.stattests._shared import NanPolicy
 
@@ -64,7 +65,8 @@ def _clean_factorial(
     estimand="main effects and interaction of two independent factors",
     code_template=(
         "edacore.stattests.factorial.two_way_anova("
-        "{df}, outcome={outcome!r}, factors={factors!r}, typ={typ}, nan_policy={nan_policy!r})"
+        "{df}, outcome={outcome!r}, factors={factors!r}, typ={typ}, ci={ci}, "
+        "nan_policy={nan_policy!r})"
     ),
 )
 def two_way_anova(
@@ -72,6 +74,7 @@ def two_way_anova(
     outcome: str,
     factors: list[str],
     typ: int = 2,
+    ci: float = 0.95,
     nan_policy: NanPolicy = "omit",
 ) -> list[TestResult]:
     """Returns one TestResult per term (both main effects and the
@@ -99,8 +102,14 @@ def two_way_anova(
 
     ss_type = "III" if typ == 3 else "II"
     results = []
+    df_residual = float(aov.loc["Residual", "df"])
     for row_name, label in term_labels.items():
         row = aov.loc[row_name]
+        # Section 6.7 is silent on a factorial effect size; partial
+        # eta-squared per term is what effectsize::eta_squared reports for
+        # car::Anova, and is the only one that is comparable across terms
+        # of the same model.
+        pes = partial_eta_squared_from_f(float(row["F"]), float(row["df"]), df_residual, ci=ci)
         results.append(
             TestResult(
                 fact_id=f"two_way_anova.{outcome}.{label}",
@@ -108,8 +117,12 @@ def two_way_anova(
                 estimand=f"effect of '{label}' on '{outcome}' (Type {ss_type} SS)",
                 statistic=float(row["F"]),
                 statistic_name="F",
-                df=(float(row["df"]), float(aov.loc["Residual", "df"])),
+                df=(float(row["df"]), df_residual),
                 p_value=float(row["PR(>F)"]),
+                effect_size=pes["estimate"],
+                effect_size_name="partial_eta_squared",
+                effect_size_ci=(pes["ci_low"], pes["ci_high"]),
+                effect_magnitude=magnitude_label(pes["estimate"], "partial_eta_squared"),
                 n={"total": len(clean)},
                 warnings=list(warnings) if label == factors[0] else [],
                 validity_notes=validity_notes,
@@ -127,11 +140,15 @@ def two_way_anova(
     estimand="main effects and interaction of two independent factors (rank-based)",
     code_template=(
         "edacore.stattests.factorial.aligned_rank_transform_anova("
-        "{df}, outcome={outcome!r}, factors={factors!r}, nan_policy={nan_policy!r})"
+        "{df}, outcome={outcome!r}, factors={factors!r}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
 def aligned_rank_transform_anova(
-    df: pd.DataFrame, outcome: str, factors: list[str], nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame,
+    outcome: str,
+    factors: list[str],
+    ci: float = 0.95,
+    nan_policy: NanPolicy = "omit",
 ) -> list[TestResult]:
     """Aligned Rank Transform (Wobbrock et al. 2011), ported exactly from
     ARTool::art + anova. Scope: two factors only (main effects + one
@@ -161,6 +178,11 @@ def aligned_rank_transform_anova(
         model = smf.ols(f"_art_rank ~ C({a}, Sum) * C({b}, Sum)", data=work).fit()
         aov = sm.stats.anova_lm(model, typ=3)
         row = aov.loc[row_for_term[term]]
+        df_residual = float(aov.loc["Residual", "df"])
+        # Partial eta-squared on the aligned-rank F, as for two_way_anova:
+        # a rank-based proportion-of-variance, so read it as an effect size
+        # for the transformed response rather than the raw outcome.
+        pes = partial_eta_squared_from_f(float(row["F"]), float(row["df"]), df_residual, ci=ci)
         results.append(
             TestResult(
                 fact_id=f"aligned_rank_transform_anova.{outcome}.{term}",
@@ -168,8 +190,12 @@ def aligned_rank_transform_anova(
                 estimand=f"effect of '{term}' on '{outcome}' (aligned rank transform)",
                 statistic=float(row["F"]),
                 statistic_name="F",
-                df=(float(row["df"]), float(aov.loc["Residual", "df"])),
+                df=(float(row["df"]), df_residual),
                 p_value=float(row["PR(>F)"]),
+                effect_size=pes["estimate"],
+                effect_size_name="partial_eta_squared",
+                effect_size_ci=(pes["ci_low"], pes["ci_high"]),
+                effect_magnitude=magnitude_label(pes["estimate"], "partial_eta_squared"),
                 n={"total": len(clean)},
                 warnings=list(warnings) if term == a else [],
             )

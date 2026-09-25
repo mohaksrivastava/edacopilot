@@ -29,6 +29,7 @@ from edacore.effect_sizes import (
     eta_squared,
     magnitude_label,
     omega_squared,
+    omega_squared_from_f,
 )
 from edacore.registry import register
 from edacore.stattests._shared import MAX_EXACT_PERMUTATIONS, NanPolicy
@@ -122,11 +123,11 @@ def one_way_anova(
     estimand="mean of the outcome across k independent groups, unequal variance",
     code_template=(
         "edacore.stattests.k_independent.welch_anova("
-        "{df}, outcome={outcome!r}, group={group!r}, nan_policy={nan_policy!r})"
+        "{df}, outcome={outcome!r}, group={group!r}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
 def welch_anova(
-    df: pd.DataFrame, outcome: str, group: str, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame, outcome: str, group: str, ci: float = 0.95, nan_policy: NanPolicy = "omit"
 ) -> TestResult:
     warnings: list[str] = []
     clean = _clean_k_groups(df, outcome, group, nan_policy, warnings)
@@ -149,8 +150,10 @@ def welch_anova(
     p_value = float(stats.f.sf(f_stat, df1, df2))
 
     # effectsize::omega_squared's F_to_omega2 approximation for a Welch
-    # htest (not the classical SS-based formula -- see module docstring).
-    omega2 = max(0.0, ((f_stat - 1) * df1) / (f_stat * df1 + df2 + 1))
+    # htest (not the classical SS-based formula -- see module docstring),
+    # with its one-sided noncentral-F interval on the Welch df.
+    omega = omega_squared_from_f(f_stat, df1, df2, ci=ci)
+    omega2 = omega["estimate"]
 
     return TestResult(
         fact_id=f"welch_anova.{outcome}",
@@ -162,6 +165,7 @@ def welch_anova(
         p_value=p_value,
         effect_size=float(omega2),
         effect_size_name="omega_squared",
+        effect_size_ci=(omega["ci_low"], omega["ci_high"]),
         effect_magnitude=magnitude_label(float(omega2), "omega_squared")
         if omega2 > 0
         else "negligible",

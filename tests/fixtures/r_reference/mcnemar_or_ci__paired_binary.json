@@ -1,0 +1,1 @@
+{"r_function":"p/(1-p) at stats::binom.test(b01, b01+b10)'s Clopper-Pearson bounds","data":"paired_binary.csv","b01":7,"b10":7,"estimate":1,"ci_low":0.2993096818105993,"ci_high":3.34102122574435}

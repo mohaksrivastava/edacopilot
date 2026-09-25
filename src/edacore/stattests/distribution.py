@@ -10,7 +10,13 @@ Verified against R (tests/fixtures/r_reference/).
   cannot reproduce R's 1e-13 either), disclosed in `warnings`.
 - tost_equivalence: bounds are RAW (same units as the outcome), matching
   TOSTER::t_TOST's default `eqbound_type="raw"`, not standardized
-  (Cohen's d) bounds. Overall p-value is max(p_lower, p_upper).
+  (Cohen's d) bounds. Overall p-value is max(p_lower, p_upper). Both
+  intervals it reports are at 1 - 2*alpha, not 1 - alpha: that is the
+  interval whose containment within the bounds is equivalent to the TOST
+  decision, and it is what TOSTER reports for the raw difference and for
+  its SMD row alike. Its SMD is Hedges' g (pooled when var_equal, else
+  the average-variance g(av)), identical to
+  effectsize::hedges_g(pooled_sd=var.equal, ci=1-2*alpha).
 - runs_test: randtests::runs.test's defaults -- dichotomize at the
   median (values equal to the threshold are dropped) and use the normal
   approximation.
@@ -25,6 +31,7 @@ import pandas as pd
 from scipy import stats
 
 from edacore.contracts import TestResult
+from edacore.effect_sizes import hedges_g, hedges_g_av, magnitude_label
 from edacore.registry import register
 from edacore.stattests._shared import NanPolicy
 from edacore.stattests.k_independent import _clean_k_groups
@@ -103,7 +110,7 @@ def anderson_ksamp(
     code_template=(
         "edacore.stattests.distribution.tost_equivalence("
         "{df}, outcome={outcome!r}, group={group!r}, low={low}, high={high}, "
-        "var_equal={var_equal}, nan_policy={nan_policy!r})"
+        "var_equal={var_equal}, alpha={alpha}, nan_policy={nan_policy!r})"
     ),
 )
 def tost_equivalence(
@@ -113,13 +120,22 @@ def tost_equivalence(
     low: float,
     high: float,
     var_equal: bool = False,
+    alpha: float = 0.05,
     nan_policy: NanPolicy = "omit",
 ) -> TestResult:
     """`low`/`high` are RAW bounds on mean(group1) - mean(group2), in the
     outcome's own units (not standardized). Equivalence is concluded when
-    p_value (the larger of the two one-sided p-values) is below alpha."""
+    `p_value` (the larger of the two one-sided p-values) is below `alpha`.
+
+    Both reported intervals are at 1 - 2*`alpha`, which is TOSTER's own
+    convention and the level at which "the interval lies inside the
+    bounds" and "both one-sided tests reject" are the same statement;
+    showing a 95% interval next to a 5% TOST decision would invite exactly
+    the misreading this tool exists to prevent."""
     if low >= high:
         raise ValueError(f"low ({low}) must be less than high ({high})")
+    if not 0 < alpha < 0.5:
+        raise ValueError(f"alpha must be in (0, 0.5), got {alpha}")
     warnings: list[str] = []
     x, y, g1, g2 = _clean_groups(df, group, outcome, nan_policy, warnings)
     n1, n2 = len(x), len(y)
@@ -141,6 +157,19 @@ def tost_equivalence(
     p_upper = float(stats.t.cdf(t_upper, dof))
     p_value = max(p_lower, p_upper)
 
+    # TOSTER's own interval: 1 - 2*alpha, the level at which "the interval
+    # lies inside the bounds" and "both one-sided tests reject" are the
+    # same statement.
+    ci_level = 1 - 2 * alpha
+    crit = float(stats.t.ppf(1 - alpha, dof))
+    diff_ci = (diff - crit * se, diff + crit * se)
+    g = (
+        hedges_g(df, outcome, group, (g1, g2), ci=ci_level)
+        if var_equal
+        else hedges_g_av(df, outcome, group, (g1, g2), ci=ci_level)
+    )
+    g_name = "hedges_g" if var_equal else "hedges_g_av"
+
     return TestResult(
         fact_id=f"tost_equivalence.{outcome}",
         function="tost_equivalence",
@@ -152,6 +181,12 @@ def tost_equivalence(
         df=float(dof),
         p_value=p_value,
         estimate=diff,
+        ci=diff_ci,
+        ci_level=ci_level,
+        effect_size=g["estimate"],
+        effect_size_name=g_name,
+        effect_size_ci=(g["ci_low"], g["ci_high"]),
+        effect_magnitude=magnitude_label(g["estimate"], g_name),
         n={str(g1): n1, str(g2): n2},
         warnings=warnings,
         validity_notes=[

@@ -1,0 +1,1 @@
+{"r_function":"effectsize::cohens_w(p=)","data":"category_counts.csv","expected_probs":[0.2,0.3,0.3,0.2],"estimate":0.1656833739159028,"ci_low":0,"ci_high":2}

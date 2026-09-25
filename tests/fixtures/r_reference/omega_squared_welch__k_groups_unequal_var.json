@@ -1,0 +1,1 @@
+{"r_function":"effectsize::omega_squared(stats::oneway.test(var.equal=FALSE))","data":"k_groups_unequal_var.csv","estimate":0,"ci_low":0,"ci_high":1}

@@ -1,0 +1,1 @@
+{"r_function":"DescTools::SpearmanRho(conf.level=0.95)","data":"rank_corr_n100.csv","estimate":0.2491449144914492,"ci_low":0.05543983232963105,"ci_high":0.424775951888597}

@@ -1,0 +1,1 @@
+{"r_function":"effectsize::eta_squared(afex::aov_ez(...)) and effectsize::F_to_eta2","data":"repeated_measures_long.csv","estimate":0.0538166766799076,"ci_low":0,"ci_high":1,"estimate_from_f":0.0538166766799076,"ci_low_from_f":0,"ci_high_from_f":1}

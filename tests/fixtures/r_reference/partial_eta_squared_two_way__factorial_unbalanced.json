@@ -1,0 +1,1 @@
+{"r_function":"effectsize::F_to_eta2 on car::Anova(aov(...), type=3) with contr.sum","data":"factorial_unbalanced.csv","terms":["factor_a","factor_b","factor_a:factor_b"],"estimate":[0.04891334532802345,0.6590686241446575,0.379159133808943],"ci_low":[0,0.4585918425106614,0.1375495642296179],"ci_high":[1,1,1]}

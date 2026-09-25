@@ -14,7 +14,14 @@ import pandas as pd
 from scipy import stats
 
 from edacore.contracts import TestResult
-from edacore.effect_sizes import magnitude_label
+from edacore.effect_sizes import (
+    _clopper_pearson_ci,
+    cohens_d_one_sample,
+    cohens_h_one_sample,
+    cohens_w_gof,
+    magnitude_label,
+    rank_biserial_one_sample,
+)
 from edacore.registry import register
 from edacore.stattests._shared import NanPolicy, clean_series
 
@@ -83,7 +90,7 @@ def one_sample_t(
     # (it doesn't depend on mu0); shift by -mu0 so it's on the same scale
     # as `estimate` (the mean difference from mu0).
     ci_bounds = result.confidence_interval(ci)
-    d = float((x.mean() - mu0) / x.std(ddof=1))
+    d = cohens_d_one_sample(df, col, mu0, ci=ci)
 
     return TestResult(
         fact_id=f"one_sample_t.{col}",
@@ -96,9 +103,10 @@ def one_sample_t(
         estimate=float(x.mean() - mu0),
         ci=(float(ci_bounds.low - mu0), float(ci_bounds.high - mu0)),
         ci_level=ci,
-        effect_size=d,
+        effect_size=d["estimate"],
         effect_size_name="cohens_d",
-        effect_magnitude=magnitude_label(d, "cohens_d"),
+        effect_size_ci=(d["ci_low"], d["ci_high"]),
+        effect_magnitude=magnitude_label(d["estimate"], "cohens_d"),
         n={col: n},
         warnings=warnings,
     )
@@ -113,17 +121,18 @@ def one_sample_t(
     estimand="median vs. a reference value",
     code_template=(
         "edacore.stattests.one_sample.wilcoxon_one_sample("
-        "{df}, col={col!r}, mu0={mu0}, nan_policy={nan_policy!r})"
+        "{df}, col={col!r}, mu0={mu0}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
 def wilcoxon_one_sample(
-    df: pd.DataFrame, col: str, mu0: float, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame, col: str, mu0: float, ci: float = 0.95, nan_policy: NanPolicy = "omit"
 ) -> TestResult:
     warnings: list[str] = []
     x = clean_series(df[col], nan_policy, col, warnings)
     diffs = x - mu0
 
-    v, p_value, r = _wilcoxon_signed_rank_r_matched(diffs)
+    v, p_value, _ = _wilcoxon_signed_rank_r_matched(diffs)
+    rb = rank_biserial_one_sample(df, col, mu0, ci=ci)
 
     return TestResult(
         fact_id=f"wilcoxon_one_sample.{col}",
@@ -133,9 +142,11 @@ def wilcoxon_one_sample(
         statistic_name="V",
         p_value=p_value,
         estimate=float(np.median(diffs)),
-        effect_size=r,
+        ci_level=ci,
+        effect_size=rb["estimate"],
         effect_size_name="rank_biserial",
-        effect_magnitude=magnitude_label(r, "rank_biserial"),
+        effect_size_ci=(rb["ci_low"], rb["ci_high"]),
+        effect_magnitude=magnitude_label(rb["estimate"], "rank_biserial"),
         n={col: len(x)},
         warnings=warnings,
     )
@@ -150,10 +161,12 @@ def wilcoxon_one_sample(
     estimand="median vs. a reference value (sign only)",
     code_template=(
         "edacore.stattests.one_sample.sign_test("
-        "{df}, col={col!r}, mu0={mu0}, nan_policy={nan_policy!r})"
+        "{df}, col={col!r}, mu0={mu0}, ci={ci}, nan_policy={nan_policy!r})"
     ),
 )
-def sign_test(df: pd.DataFrame, col: str, mu0: float, nan_policy: NanPolicy = "omit") -> TestResult:
+def sign_test(
+    df: pd.DataFrame, col: str, mu0: float, ci: float = 0.95, nan_policy: NanPolicy = "omit"
+) -> TestResult:
     warnings: list[str] = []
     x = clean_series(df[col], nan_policy, col, warnings)
     diffs = x - mu0
@@ -164,6 +177,9 @@ def sign_test(df: pd.DataFrame, col: str, mu0: float, nan_policy: NanPolicy = "o
 
     result = stats.binomtest(n_pos, n_nonzero, p=0.5)
     proportion = n_pos / n_nonzero if n_nonzero else float("nan")
+    # The effect size IS the proportion of positive signs, so its exact
+    # (Clopper-Pearson) interval serves as both `ci` and `effect_size_ci`.
+    prop_ci = _clopper_pearson_ci(n_pos, n_nonzero, ci) if n_nonzero else (float("nan"),) * 2
 
     return TestResult(
         fact_id=f"sign_test.{col}",
@@ -173,8 +189,11 @@ def sign_test(df: pd.DataFrame, col: str, mu0: float, nan_policy: NanPolicy = "o
         statistic_name="n_positive",
         p_value=float(result.pvalue),
         estimate=proportion,
+        ci=prop_ci,
+        ci_level=ci,
         effect_size=proportion,
         effect_size_name="proportion",
+        effect_size_ci=prop_ci,
         n={col: n_nonzero},
         warnings=warnings,
     )
@@ -203,7 +222,7 @@ def binomial_test(
     result = stats.binomtest(successes, n, p=p0)
     ci_bounds = result.proportion_ci(confidence_level=ci)
     p_hat = successes / n
-    h = 2 * np.arcsin(np.sqrt(p_hat)) - 2 * np.arcsin(np.sqrt(p0))
+    h = cohens_h_one_sample(df, col, p0, ci=ci)
 
     return TestResult(
         fact_id=f"binomial_test.{col}",
@@ -215,9 +234,10 @@ def binomial_test(
         estimate=float(p_hat),
         ci=(float(ci_bounds.low), float(ci_bounds.high)),
         ci_level=ci,
-        effect_size=float(h),
+        effect_size=h["estimate"],
         effect_size_name="cohens_h",
-        effect_magnitude=magnitude_label(float(h), "cohens_h"),
+        effect_size_ci=(h["ci_low"], h["ci_high"]),
+        effect_magnitude=magnitude_label(h["estimate"], "cohens_h"),
         n={col: n},
         warnings=warnings,
     )
@@ -232,10 +252,12 @@ def binomial_test(
     estimand="category proportions vs. reference proportions",
     code_template=(
         "edacore.stattests.one_sample.chi2_goodness_of_fit("
-        "{df}, col={col!r}, expected={expected!r})"
+        "{df}, col={col!r}, expected={expected!r}, ci={ci})"
     ),
 )
-def chi2_goodness_of_fit(df: pd.DataFrame, col: str, expected: dict[str, float]) -> TestResult:
+def chi2_goodness_of_fit(
+    df: pd.DataFrame, col: str, expected: dict[str, float], ci: float = 0.95
+) -> TestResult:
     """`expected` maps category -> expected proportion (must sum to 1)."""
     total = sum(expected.values())
     if not np.isclose(total, 1.0):
@@ -247,7 +269,7 @@ def chi2_goodness_of_fit(df: pd.DataFrame, col: str, expected: dict[str, float])
     expected_counts = np.array([expected[c] * n for c in categories])
 
     result = stats.chisquare(observed, f_exp=expected_counts)
-    w = float(np.sqrt(result.statistic / n))
+    w = cohens_w_gof(df, col, expected, ci=ci)
 
     return TestResult(
         fact_id=f"chi2_goodness_of_fit.{col}",
@@ -257,9 +279,11 @@ def chi2_goodness_of_fit(df: pd.DataFrame, col: str, expected: dict[str, float])
         statistic_name="chi2",
         df=float(len(categories) - 1),
         p_value=float(result.pvalue),
-        effect_size=w,
+        effect_size=w["estimate"],
         effect_size_name="cohens_w",
-        effect_magnitude=magnitude_label(w, "cohens_w"),
+        effect_size_ci=(w["ci_low"], w["ci_high"]),
+        ci_level=ci,
+        effect_magnitude=magnitude_label(w["estimate"], "cohens_w"),
         n={col: n},
     )
 

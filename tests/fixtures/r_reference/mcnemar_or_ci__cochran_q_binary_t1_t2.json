@@ -1,0 +1,1 @@
+{"r_function":"stats::mcnemar.test + p/(1-p) at binom.test's Clopper-Pearson bounds","data":"cochran_q_binary.csv","columns":["t1","t2"],"b01":10,"b10":3,"statistic":2.769230769230769,"p_value":0.09609232945567309,"estimate":3.333333333333333,"ci_low":0.8582817156997855,"ci_high":18.848723552419568}

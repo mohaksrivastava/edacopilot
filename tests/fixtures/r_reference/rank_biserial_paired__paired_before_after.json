@@ -1,0 +1,1 @@
+{"r_function":"effectsize::rank_biserial(paired=TRUE)","data":"paired_before_after.csv","estimate":0.711111111111111,"ci_low":0.4695930177736546,"ci_high":0.8536099829097877}

@@ -1272,3 +1272,326 @@ for (case in rank_corr_cases) {
 }
 
 cat("Wrote fixtures to", out_dir, "\n")
+
+# ---------------------------------------------------------------------------
+# M3.4: effect size + confidence interval for every Section 6.7 test that was
+# missing one (ARCHITECTURE.md Section 16's M3 acceptance criterion; the audit
+# in docs/m3_effect_size_audit.md). Appended last and reusing the datasets and
+# R objects built above -- no new RNG draws at all -- so no fixture above can
+# shift.
+#
+# Where effectsize is the reference, its `alternative="greater"` default gives
+# a ONE-sided interval for proportion-of-variance and chi-square-family
+# measures (upper bound fixed at its maximum); that default is kept, since
+# these measures are nonnegative by construction.
+# ---------------------------------------------------------------------------
+
+## One sample ---------------------------------------------------------------
+
+es_d_one <- effectsize::cohens_d(normal_sample, mu = mu0)
+write_fixture("cohens_d_one_sample__normal_sample", list(
+  r_function = "effectsize::cohens_d(mu=)", data = "normal_sample.csv", mu0 = mu0,
+  estimate = es_d_one$Cohens_d, ci_low = es_d_one$CI_low, ci_high = es_d_one$CI_high
+))
+
+es_rb_one <- effectsize::rank_biserial(normal_sample, mu = mu0)
+write_fixture("rank_biserial_one_sample__normal_sample", list(
+  r_function = "effectsize::rank_biserial(mu=)", data = "normal_sample.csv", mu0 = mu0,
+  estimate = es_rb_one$r_rank_biserial, ci_low = es_rb_one$CI_low, ci_high = es_rb_one$CI_high
+))
+
+# sign_test / sign_test_paired: Clopper-Pearson interval on the proportion of
+# positive signs, straight from the binom.test objects the p-values came from.
+write_fixture("sign_test_ci__normal_sample", list(
+  r_function = "stats::binom.test(...)$conf.int (Clopper-Pearson)",
+  data = "normal_sample.csv", mu0 = mu0,
+  estimate = unname(sign_result$estimate),
+  ci_low = sign_result$conf.int[1], ci_high = sign_result$conf.int[2]
+))
+write_fixture("sign_test_paired_ci__paired_before_after", list(
+  r_function = "stats::binom.test(...)$conf.int (Clopper-Pearson)",
+  data = "paired_before_after.csv",
+  estimate = unname(sign_paired$estimate),
+  ci_low = sign_paired$conf.int[1], ci_high = sign_paired$conf.int[2]
+))
+
+# binomial_test's Cohen's h: h(p) = 2*asin(sqrt(p)) - 2*asin(sqrt(p0)) is
+# strictly increasing in p, so the exact Clopper-Pearson interval for p maps
+# term-by-term onto an exact interval for h.
+h_from_p <- function(p, p0) 2 * asin(sqrt(p)) - 2 * asin(sqrt(p0))
+write_fixture("cohens_h_one_sample__binary_sample", list(
+  r_function = "h(p)=2*asin(sqrt(p))-2*asin(sqrt(p0)) at stats::binom.test's Clopper-Pearson bounds",
+  data = "binary_sample.csv", p0 = p0,
+  estimate = h_from_p(unname(bt$estimate), p0),
+  ci_low = h_from_p(bt$conf.int[1], p0), ci_high = h_from_p(bt$conf.int[2], p0)
+))
+
+es_w_gof <- effectsize::cohens_w(category_counts, p = expected_probs)
+write_fixture("cohens_w_gof__category_counts", list(
+  r_function = "effectsize::cohens_w(p=)", data = "category_counts.csv",
+  expected_probs = unname(expected_probs),
+  estimate = es_w_gof$Cohens_w, ci_low = es_w_gof$CI_low, ci_high = es_w_gof$CI_high
+))
+
+## Two independent groups ---------------------------------------------------
+
+# welch_t's effect size: Hedges' g with the average-variance denominator
+# (effectsize's pooled_sd=FALSE, "g(av)"), which -- like the Welch test
+# itself -- does not assume equal variances. Its J correction and noncentral-t
+# interval both use the Welch-Satterthwaite df, not n1+n2-2.
+es_g_av <- effectsize::hedges_g(value ~ group, data = group_unequal_var, pooled_sd = FALSE)
+write_fixture("hedges_g_av__two_groups_unequal_var", list(
+  r_function = "effectsize::hedges_g(pooled_sd=FALSE)", data = "two_groups_unequal_var.csv",
+  estimate = es_g_av$Hedges_g, ci_low = es_g_av$CI_low, ci_high = es_g_av$CI_high
+))
+
+write_fixture("brunner_munzel_ci__two_groups_equal_var", list(
+  r_function = "brunnermunzel::brunnermunzel.test(...)$conf.int",
+  data = "two_groups_equal_var.csv",
+  estimate = unname(bm$estimate), ci_low = bm$conf.int[1], ci_high = bm$conf.int[2]
+))
+
+## Two paired groups --------------------------------------------------------
+
+es_rb_paired <- effectsize::rank_biserial(paired_after, paired_before, paired = TRUE)
+write_fixture("rank_biserial_paired__paired_before_after", list(
+  r_function = "effectsize::rank_biserial(paired=TRUE)", data = "paired_before_after.csv",
+  estimate = es_rb_paired$r_rank_biserial,
+  ci_low = es_rb_paired$CI_low, ci_high = es_rb_paired$CI_high
+))
+
+## k independent / k related groups -----------------------------------------
+
+write_fixture("omega_squared_welch__k_groups_unequal_var", list(
+  r_function = "effectsize::omega_squared(stats::oneway.test(var.equal=FALSE))",
+  data = "k_groups_unequal_var.csv",
+  estimate = wa_omega2[[1]][1], ci_low = wa_omega2$CI_low, ci_high = wa_omega2$CI_high
+))
+
+# repeated_measures_anova's partial eta^2 interval. effectsize::eta_squared on
+# the afex fit and F_to_eta2 on the UNCORRECTED F/df agree exactly (checked),
+# i.e. the sphericity correction changes the test's df but not the effect
+# size's; both are written so the Python test can assert that too.
+es_pes_rm <- effectsize::eta_squared(rm_fit)
+es_pes_rm_from_f <- effectsize::F_to_eta2(
+  rm_uncorrected[1, "F"], rm_uncorrected[1, "num Df"], rm_uncorrected[1, "den Df"]
+)
+write_fixture("partial_eta_squared_rm__repeated_measures", list(
+  r_function = "effectsize::eta_squared(afex::aov_ez(...)) and effectsize::F_to_eta2",
+  data = "repeated_measures_long.csv",
+  estimate = es_pes_rm$Eta2_partial, ci_low = es_pes_rm$CI_low, ci_high = es_pes_rm$CI_high,
+  estimate_from_f = es_pes_rm_from_f$Eta2_partial,
+  ci_low_from_f = es_pes_rm_from_f$CI_low, ci_high_from_f = es_pes_rm_from_f$CI_high
+))
+
+## Factorial ----------------------------------------------------------------
+
+# Partial eta^2 per term, from each term's own F and df (effectsize::F_to_eta2
+# is exactly what effectsize::eta_squared calls for these objects -- checked
+# against eta_squared(car::Anova(..., type=3)) directly).
+tw_terms <- rownames(anova_2way)[-c(1, nrow(anova_2way))]
+tw_f <- unname(anova_2way[["F value"]][-c(1, nrow(anova_2way))])
+tw_df1 <- unname(anova_2way[["Df"]][-c(1, nrow(anova_2way))])
+tw_df2 <- unname(anova_2way[["Df"]][nrow(anova_2way)])
+tw_pes <- effectsize::F_to_eta2(tw_f, tw_df1, tw_df2)
+write_fixture("partial_eta_squared_two_way__factorial_unbalanced", list(
+  r_function = "effectsize::F_to_eta2 on car::Anova(aov(...), type=3) with contr.sum",
+  data = "factorial_unbalanced.csv", terms = tw_terms,
+  estimate = tw_pes$Eta2_partial, ci_low = tw_pes$CI_low, ci_high = tw_pes$CI_high
+))
+
+art_pes <- effectsize::F_to_eta2(art_anova$`F value`, art_anova$Df, art_anova$Df.res)
+write_fixture("partial_eta_squared_art__factorial_unbalanced", list(
+  r_function = "effectsize::F_to_eta2 on ARTool::art + anova",
+  data = "factorial_unbalanced.csv", terms = art_anova$Term,
+  estimate = art_pes$Eta2_partial, ci_low = art_pes$CI_low, ci_high = art_pes$CI_high
+))
+
+## Categorical association --------------------------------------------------
+
+# mcnemar's odds ratio b01/b10 is a monotone transform p/(1-p) of the
+# binomial proportion b01/(b01+b10), so binom.test's exact Clopper-Pearson
+# interval for that proportion maps onto an exact conditional interval for
+# the odds ratio. base R's mcnemar.test reports no effect size at all, so
+# this (not an R function's own output) is the reference construction.
+mcn_b01 <- unname(mcn_tab["0", "1"])
+mcn_b10 <- unname(mcn_tab["1", "0"])
+mcn_prop <- binom.test(mcn_b01, mcn_b01 + mcn_b10)
+write_fixture("mcnemar_or_ci__paired_binary", list(
+  r_function = "p/(1-p) at stats::binom.test(b01, b01+b10)'s Clopper-Pearson bounds",
+  data = "paired_binary.csv", b01 = mcn_b01, b10 = mcn_b10,
+  estimate = mcn_b01 / mcn_b10,
+  ci_low = mcn_prop$conf.int[1] / (1 - mcn_prop$conf.int[1]),
+  ci_high = mcn_prop$conf.int[2] / (1 - mcn_prop$conf.int[2])
+))
+
+## Correlation --------------------------------------------------------------
+
+# spearman: R's cor.test reports no CI for rho. DescTools::SpearmanRho is the
+# reference: Fisher z with SE = 1/sqrt(n - 3), clamped to [-1, 1].
+sp_ci_small <- DescTools::SpearmanRho(corr_small$x, corr_small$y, conf.level = 0.95)
+write_fixture("spearman_ci__correlation_small_no_ties", list(
+  r_function = "DescTools::SpearmanRho(conf.level=0.95)",
+  data = "correlation_small_no_ties.csv",
+  estimate = unname(sp_ci_small["rho"]),
+  ci_low = unname(sp_ci_small["lwr.ci"]), ci_high = unname(sp_ci_small["upr.ci"])
+))
+
+# kendall_tau: R's cor.test reports no CI for tau either.
+# DescTools::KendallTauB is the reference: the delta-method asymptotic
+# variance of tau-b computed from the joint contingency table (so it handles
+# ties, which the Fisher-z route does not), clamped to [-1, 1].
+kt_ci_ties <- DescTools::KendallTauB(corr_ties$x, corr_ties$y, conf.level = 0.95)
+write_fixture("kendall_tau_ci__correlation_with_ties", list(
+  r_function = "DescTools::KendallTauB(conf.level=0.95)", data = "correlation_with_ties.csv",
+  estimate = unname(kt_ci_ties["tau_b"]),
+  ci_low = unname(kt_ci_ties["lwr.ci"]), ci_high = unname(kt_ci_ties["upr.ci"])
+))
+
+# partial_correlation: no installed R package reports a CI for a partial
+# correlation, so the reference is the standard Fisher-z interval with
+# SE = 1/sqrt(n - k - 3) (k = number of controlled variables), evaluated
+# HERE in R rather than typed as a literal -- but it is the same published
+# formula the Python side implements, not an independent implementation.
+pc_est <- pcor_r$estimate
+pc_se <- 1 / sqrt(n_pcor - 1 - 3)
+pc_ci <- tanh(atanh(pc_est) + c(-1, 1) * qnorm(0.975) * pc_se)
+write_fixture("partial_correlation_ci__partial_correlation_data", list(
+  r_function = "tanh(atanh(r) +/- qnorm(0.975)/sqrt(n - k - 3)) (no R package reports this)",
+  data = "partial_correlation_data.csv",
+  estimate = pc_est, ci_low = pc_ci[1], ci_high = pc_ci[2]
+))
+
+## Distribution / equivalence ------------------------------------------------
+
+# tost_equivalence: TOSTER's own primary interval is the 1 - 2*alpha interval
+# for the raw difference (t.test(conf.level = 1 - alpha*2)), and its SMD row
+# is Hedges' g at that same level -- identical to
+# effectsize::hedges_g(pooled_sd = var.equal, ci = 1 - 2*alpha) (checked).
+tost_eff <- tost_r$effsize
+tost_g <- effectsize::hedges_g(tost_x, tost_y, pooled_sd = TRUE, ci = 0.90)
+write_fixture("tost_equivalence_ci__tost_equivalence_data", list(
+  r_function = "TOSTER::t_TOST(...)$effsize and effectsize::hedges_g(ci=1-2*alpha)",
+  data = "tost_equivalence_data.csv", conf_level = 0.90,
+  estimate_raw = tost_eff["Raw", "estimate"],
+  ci_low_raw = tost_eff["Raw", "lower.ci"], ci_high_raw = tost_eff["Raw", "upper.ci"],
+  hedges_g = tost_eff["Hedges's g", "estimate"],
+  hedges_g_ci_low = tost_eff["Hedges's g", "lower.ci"],
+  hedges_g_ci_high = tost_eff["Hedges's g", "upper.ci"],
+  hedges_g_effectsize = tost_g$Hedges_g,
+  hedges_g_effectsize_ci_low = tost_g$CI_low,
+  hedges_g_effectsize_ci_high = tost_g$CI_high
+))
+
+cat("Wrote M3.4 effect-size/CI fixtures to", out_dir, "\n")
+
+# ---------------------------------------------------------------------------
+# M3.4 (continued): cases where the datasets above make a CI vacuous.
+# k_groups_unequal_var and repeated_measures_wide both have Welch F / RM F
+# below 1, so omega^2 and partial eta^2 are 0 with a [0, 1] interval -- true,
+# but it would pass against almost any implementation. These two datasets have
+# a real effect, so the lower bound is strictly positive and actually tests the
+# noncentral-F inversion. Each sets its own seed, appended last, so no draw
+# above shifts.
+# ---------------------------------------------------------------------------
+
+set.seed(20260101 + 11)
+n_wa_eff <- 20
+k_groups_unequal_var_effect <- data.frame(
+  value = c(rnorm(n_wa_eff, 10, 3), rnorm(n_wa_eff, 18, 8), rnorm(n_wa_eff, 30, 15)),
+  group = factor(rep(c("A", "B", "C"), each = n_wa_eff))
+)
+write_data("k_groups_unequal_var_effect", k_groups_unequal_var_effect)
+wa_eff <- oneway.test(value ~ group, data = k_groups_unequal_var_effect, var.equal = FALSE)
+wa_eff_omega2 <- suppressWarnings(effectsize::omega_squared(wa_eff))
+write_fixture("welch_anova__k_groups_unequal_var_effect", list(
+  r_function = "stats::oneway.test(var.equal=FALSE) + effectsize::omega_squared",
+  data = "k_groups_unequal_var_effect.csv",
+  statistic = unname(wa_eff$statistic),
+  df1 = unname(wa_eff$parameter[1]), df2 = unname(wa_eff$parameter[2]),
+  p_value = wa_eff$p.value,
+  omega_squared = wa_eff_omega2[[1]][1],
+  ci_low = wa_eff_omega2$CI_low, ci_high = wa_eff_omega2$CI_high
+))
+
+set.seed(20260101 + 12)
+n_rm_eff <- 20
+rm_eff_base <- rnorm(n_rm_eff, 50, 8)
+rm_eff_wide <- data.frame(
+  subject = seq_len(n_rm_eff),
+  t1 = rm_eff_base + rnorm(n_rm_eff, 0, 3),
+  t2 = rm_eff_base + rnorm(n_rm_eff, 6, 3),
+  t3 = rm_eff_base + rnorm(n_rm_eff, 12, 3)
+)
+write_data("repeated_measures_effect_wide", rm_eff_wide)
+rm_eff_long <- data.frame(
+  subject = factor(rep(rm_eff_wide$subject, 3)),
+  condition = factor(rep(c("t1", "t2", "t3"), each = n_rm_eff)),
+  value = c(rm_eff_wide$t1, rm_eff_wide$t2, rm_eff_wide$t3)
+)
+write_data("repeated_measures_effect_long", rm_eff_long)
+rm_eff_fit <- afex::aov_ez(
+  id = "subject", dv = "value", data = rm_eff_long, within = "condition",
+  anova_table = list(es = "pes", correction = "GG")
+)
+rm_eff_gg <- rm_eff_fit$anova_table
+rm_eff_unc <- afex::aov_ez(
+  id = "subject", dv = "value", data = rm_eff_long, within = "condition",
+  anova_table = list(es = "pes", correction = "none")
+)$anova_table
+rm_eff_pes <- effectsize::eta_squared(rm_eff_fit)
+write_fixture("repeated_measures_anova__repeated_measures_effect", list(
+  r_function = "afex::aov_ez + effectsize::eta_squared",
+  data = "repeated_measures_effect_long.csv",
+  statistic = unname(rm_eff_gg[1, "F"]), pes = unname(rm_eff_gg[1, "pes"]),
+  df1_uncorrected = unname(rm_eff_unc[1, "num Df"]),
+  df2_uncorrected = unname(rm_eff_unc[1, "den Df"]),
+  p_value_uncorrected = unname(rm_eff_unc[1, "Pr(>F)"]),
+  df1_gg = unname(rm_eff_gg[1, "num Df"]), df2_gg = unname(rm_eff_gg[1, "den Df"]),
+  p_value_gg = unname(rm_eff_gg[1, "Pr(>F)"]),
+  estimate = rm_eff_pes$Eta2_partial,
+  ci_low = rm_eff_pes$CI_low, ci_high = rm_eff_pes$CI_high
+))
+
+# An ASYMMETRIC paired-binary table for mcnemar's odds ratio: the
+# paired_binary fixture happens to have b01 == b10 (OR = 1 exactly), which
+# cannot catch an inverted ratio. cochran_q_binary's t1 vs t2 is asymmetric,
+# and needs no new data.
+mcn_asym_tab <- table(cochran_binary$t1, cochran_binary$t2)
+mcn_asym_b01 <- unname(mcn_asym_tab["0", "1"])
+mcn_asym_b10 <- unname(mcn_asym_tab["1", "0"])
+mcn_asym_r <- mcnemar.test(mcn_asym_tab, correct = TRUE)
+mcn_asym_prop <- binom.test(mcn_asym_b01, mcn_asym_b01 + mcn_asym_b10)
+write_fixture("mcnemar_or_ci__cochran_q_binary_t1_t2", list(
+  r_function = "stats::mcnemar.test + p/(1-p) at binom.test's Clopper-Pearson bounds",
+  data = "cochran_q_binary.csv", columns = c("t1", "t2"),
+  b01 = mcn_asym_b01, b10 = mcn_asym_b10,
+  statistic = unname(mcn_asym_r$statistic), p_value = mcn_asym_r$p.value,
+  estimate = mcn_asym_b01 / mcn_asym_b10,
+  ci_low = mcn_asym_prop$conf.int[1] / (1 - mcn_asym_prop$conf.int[1]),
+  ci_high = mcn_asym_prop$conf.int[2] / (1 - mcn_asym_prop$conf.int[2])
+))
+
+# Spearman/Kendall CIs on a larger, tie-free dataset as well: SpearmanRho's
+# SE depends on n, and KendallTauB's delta-method variance runs over an
+# n x n sparse table when the data are continuous (a different code path
+# from the small tied table above).
+sp_ci_100 <- DescTools::SpearmanRho(
+  read.csv(file.path(data_dir, "rank_corr_n100.csv"))$x,
+  read.csv(file.path(data_dir, "rank_corr_n100.csv"))$y,
+  conf.level = 0.95
+)
+write_fixture("spearman_ci__rank_corr_n100", list(
+  r_function = "DescTools::SpearmanRho(conf.level=0.95)", data = "rank_corr_n100.csv",
+  estimate = unname(sp_ci_100["rho"]),
+  ci_low = unname(sp_ci_100["lwr.ci"]), ci_high = unname(sp_ci_100["upr.ci"])
+))
+rc20 <- read.csv(file.path(data_dir, "rank_corr_n20.csv"))
+kt_ci_20 <- DescTools::KendallTauB(rc20$x, rc20$y, conf.level = 0.95)
+write_fixture("kendall_tau_ci__rank_corr_n20", list(
+  r_function = "DescTools::KendallTauB(conf.level=0.95)", data = "rank_corr_n20.csv",
+  estimate = unname(kt_ci_20["tau_b"]),
+  ci_low = unname(kt_ci_20["lwr.ci"]), ci_high = unname(kt_ci_20["upr.ci"])
+))
+
+cat("Wrote M3.4 non-vacuous-CI fixtures to", out_dir, "\n")

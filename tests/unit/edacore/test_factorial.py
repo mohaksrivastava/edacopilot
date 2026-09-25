@@ -30,7 +30,7 @@ def test_two_way_anova_type3_matches_r() -> None:
     assert_codegen_matches(
         registry,
         "two_way_anova",
-        {"outcome": "value", "factors": _FACTORS, "typ": 3, "nan_policy": "omit"},
+        {"outcome": "value", "factors": _FACTORS, "typ": 3, "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NS,
     )
@@ -53,7 +53,7 @@ def test_two_way_anova_type2_runs_and_codegen() -> None:
     assert_codegen_matches(
         registry,
         "two_way_anova",
-        {"outcome": "value", "factors": _FACTORS, "typ": 2, "nan_policy": "omit"},
+        {"outcome": "value", "factors": _FACTORS, "typ": 2, "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NS,
     )
@@ -77,7 +77,42 @@ def test_art_anova_matches_artool() -> None:
     assert_codegen_matches(
         registry,
         "aligned_rank_transform_anova",
-        {"outcome": "value", "factors": _FACTORS, "nan_policy": "omit"},
+        {"outcome": "value", "factors": _FACTORS, "ci": 0.95, "nan_policy": "omit"},
         df,
         namespace=_NS,
     )
+
+
+# --------------------------------------------------------------------------
+# M3.4: partial eta-squared per term (Section 16's M3 criterion)
+# --------------------------------------------------------------------------
+
+
+def _assert_per_term_pes(results: list, r: dict) -> None:
+    assert [res.effect_size_name for res in results] == ["partial_eta_squared"] * 3
+    for i, res in enumerate(results):
+        assert res.effect_size == pytest.approx(r["estimate"][i], abs=1e-6, rel=1e-6)
+        assert res.effect_size_ci is not None
+        assert res.effect_size_ci[0] == pytest.approx(r["ci_low"][i], abs=1e-6, rel=1e-6)
+        assert res.effect_size_ci[1] == pytest.approx(r["ci_high"][i], abs=1e-6, rel=1e-6)
+
+
+def test_two_way_anova_partial_eta_squared_matches_r() -> None:
+    df = data("factorial_unbalanced")
+    r = ref("partial_eta_squared_two_way__factorial_unbalanced")
+    results = fac.two_way_anova(df, "value", _FACTORS, typ=3)
+    assert [res.fact_id.rsplit(".", 1)[-1] for res in results] == r["terms"]
+    _assert_per_term_pes(results, r)
+    # Not all three terms share one value: a per-term effect size that
+    # silently reported the model-level one would pass a single-term check.
+    assert len({round(res.effect_size, 6) for res in results}) == 3
+
+
+def test_art_anova_partial_eta_squared_matches_r() -> None:
+    df = data("factorial_unbalanced")
+    r = ref("partial_eta_squared_art__factorial_unbalanced")
+    results = fac.aligned_rank_transform_anova(df, "value", _FACTORS)
+    _assert_per_term_pes(results, r)
+    # The aligned-rank effect sizes are NOT the raw-data ones.
+    raw = ref("partial_eta_squared_two_way__factorial_unbalanced")
+    assert results[0].effect_size != pytest.approx(raw["estimate"][0], abs=1e-6)

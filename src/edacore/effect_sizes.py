@@ -73,7 +73,17 @@ def _invert_nct_cdf(t_obs: float, df: float, target_p: float) -> float:
 
 def _ncp_ci(t_obs: float, df: float, hn: float, ci: float) -> tuple[float, float]:
     """Noncentral-t confidence interval for a standardized mean difference,
-    matching effectsize's `.get_ncp_t` + `sqrt(hn)` scaling exactly."""
+    matching effectsize's `.get_ncp_t` + `sqrt(hn)` scaling exactly.
+
+    Returns (nan, nan) on a degenerate sample -- a zero within-group SD
+    makes t_obs infinite and the standardized effect size itself
+    undefined, so there is no interval to invert. The point estimate is
+    still reported (as +/-inf), which is what R does too; raising here
+    would turn "this sample has no variance" into a crash partway through
+    an otherwise valid test result.
+    """
+    if not np.isfinite(t_obs) or df < 1:
+        return float("nan"), float("nan")
     alpha = 1 - ci
     ncp_low = _invert_nct_cdf(t_obs, df, 1 - alpha / 2)
     ncp_high = _invert_nct_cdf(t_obs, df, alpha / 2)
@@ -133,6 +143,76 @@ def _log_scale_ci(estimate: float, se_log: float, ci: float) -> tuple[float, flo
     return float(np.exp(log_est - z * se_log)), float(np.exp(log_est + z * se_log))
 
 
+def _fisher_z_ci(estimate: float, se_z: float, ci: float) -> tuple[float, float]:
+    """Fisher-z CI for a correlation-like statistic bounded on [-1, 1],
+    clamped to that range (the convention DescTools and effectsize share)."""
+    z = stats.norm.ppf(1 - (1 - ci) / 2)
+    z_est = np.arctanh(estimate)
+    return (
+        float(max(np.tanh(z_est - z * se_z), -1.0)),
+        float(min(np.tanh(z_est + z * se_z), 1.0)),
+    )
+
+
+def _clopper_pearson_ci(successes: int, n: int, ci: float) -> tuple[float, float]:
+    """Exact (Clopper-Pearson) interval for a binomial proportion -- the
+    interval `stats::binom.test` reports."""
+    interval = stats.binomtest(successes, n).proportion_ci(confidence_level=ci, method="exact")
+    return float(interval.low), float(interval.high)
+
+
+def _signed_rank_biserial(diffs: np.ndarray, ci: float) -> dict[str, float]:
+    """Rank-biserial correlation for one-sample / paired data: the signed
+    rank sums of the nonzero differences, (W+ - W-) / (nd(nd+1)/2).
+
+    Matches effectsize's `.r_rbs(paired=TRUE)` point estimate and its
+    `rank_biserial` CI: Fisher-z with the analytic standard error
+    sqrt((2*nd^3 + 3*nd^2 + nd)/6) / (nd(nd+1)/2), clamped to [-1, 1]
+    (verified to ~1e-16 against R). Not a bootstrap.
+    """
+    nonzero = diffs[diffs != 0]
+    nd = len(nonzero)
+    if nd == 0:
+        return {"estimate": 0.0, "ci_low": -1.0, "ci_high": 1.0}
+    ranks = stats.rankdata(np.abs(nonzero))
+    max_w = nd * (nd + 1) / 2
+    estimate = float((ranks[nonzero > 0].sum() - ranks[nonzero < 0].sum()) / max_w)
+    se_z = float(np.sqrt((2 * nd**3 + 3 * nd**2 + nd) / 6) / max_w)
+    ci_low, ci_high = _fisher_z_ci(estimate, se_z, ci)
+    return {"estimate": estimate, "ci_low": ci_low, "ci_high": ci_high}
+
+
+def partial_eta_squared_from_f(
+    f_stat: float, df1: float, df2: float, ci: float = 0.95
+) -> dict[str, float]:
+    """Partial eta-squared for one term of any F-test: F*df1 / (F*df1 + df2),
+    with the same one-sided noncentral-F CI `eta_squared` uses.
+
+    This is exactly what `effectsize::eta_squared` computes for an
+    `Anova.mlm` / `afex_aov` / ARTool anova table (confirmed by running both
+    it and `effectsize::F_to_eta2` on the same fits and getting identical
+    numbers), so it is the route for every multi-term or
+    sphericity-corrected design, where reconstructing sums of squares would
+    be ambiguous. Not registered: it converts already-computed test output
+    rather than reading a DataFrame, like `magnitude_label`.
+    """
+    estimate = float((f_stat * df1) / (f_stat * df1 + df2))
+    return {"estimate": estimate, "ci_low": _pve_ci_low(estimate, df1, df2, ci), "ci_high": 1.0}
+
+
+def omega_squared_from_f(
+    f_stat: float, df1: float, df2: float, ci: float = 0.95
+) -> dict[str, float]:
+    """Partial omega-squared from an F statistic:
+    max(0, (F-1)*df1 / (F*df1 + df2 + 1)), with the one-sided noncentral-F
+    CI. effectsize's `F_to_omega2`, used where no sums of squares exist
+    (Welch ANOVA). Not registered, for the same reason as
+    `partial_eta_squared_from_f`.
+    """
+    estimate = max(0.0, float(((f_stat - 1) * df1) / (f_stat * df1 + df2 + 1)))
+    return {"estimate": estimate, "ci_low": _pve_ci_low(estimate, df1, df2, ci), "ci_high": 1.0}
+
+
 def _two_by_two(
     df: pd.DataFrame, outcome: str, group: str, groups: tuple[str, str], event: Any
 ) -> tuple[int, int, int, int]:
@@ -177,6 +257,7 @@ _MAGNITUDE_THRESHOLDS: dict[str, tuple[float, float, float]] = {
     # measure -> (small, medium, large), compared against abs(value)
     "cohens_d": (0.2, 0.5, 0.8),
     "hedges_g": (0.2, 0.5, 0.8),
+    "hedges_g_av": (0.2, 0.5, 0.8),
     "glass_delta": (0.2, 0.5, 0.8),
     "d_z": (0.2, 0.5, 0.8),
     "cohens_h": (0.2, 0.5, 0.8),
@@ -190,7 +271,36 @@ _MAGNITUDE_THRESHOLDS: dict[str, tuple[float, float, float]] = {
     "cramers_v": (0.1, 0.3, 0.5),
     "phi": (0.1, 0.3, 0.5),
     "cohens_w": (0.1, 0.3, 0.5),
+    # Correlation coefficients, on Cohen's r conventions. kendall_tau_b is
+    # on the same scale by convention but is systematically smaller than
+    # Pearson's r for the same association (tau ~ (2/pi)*arcsin(r) under
+    # bivariate normality, e.g. r=0.5 -> tau=0.33), so these thresholds
+    # UNDERSTATE a tau-b effect. Section 6.8's "thresholds are
+    # field-dependent" caveat applies with extra force here.
+    "pearson_r": (0.1, 0.3, 0.5),
+    "point_biserial_r": (0.1, 0.3, 0.5),
+    "spearman_rho": (0.1, 0.3, 0.5),
+    "partial_r": (0.1, 0.3, 0.5),
+    "kendall_tau_b": (0.1, 0.3, 0.5),
 }
+
+# Effect sizes this module reports that deliberately have NO magnitude label:
+# unstandardized differences (a "medium" mean difference is meaningless
+# without units), ratio measures with no Cohen convention, and the
+# Brunner-Munzel relative effect. Call sites leave `effect_magnitude` unset
+# for these rather than inventing thresholds.
+UNLABELLED_MEASURES = frozenset(
+    {
+        "proportion",
+        "mean_difference",
+        "trimmed_mean_difference",
+        "odds_ratio",
+        "odds_ratio_conditional_mle",
+        "relative_effect",
+        "mutual_information_nats",
+        "dcor",
+    }
+)
 
 
 def _bca_from_bootstrap(
@@ -355,6 +465,73 @@ def hedges_g(
 
 
 @register(
+    name="hedges_g_av",
+    kind="effect",
+    stage="hypothesis",
+    code_template=(
+        "edacore.effect_sizes.hedges_g_av({df}, outcome={outcome!r}, "
+        "group={group!r}, groups={groups!r}, ci={ci})"
+    ),
+)
+def hedges_g_av(
+    df: pd.DataFrame, outcome: str, group: str, groups: tuple[str, str], ci: float = 0.95
+) -> dict[str, float]:
+    """Hedges' g with the *average*-variance denominator sqrt((s1^2+s2^2)/2)
+    instead of the pooled one -- effectsize's `hedges_g(pooled_sd = FALSE)`,
+    labelled "g(av)" there, and the effect size TOSTER pairs with a Welch
+    t-test.
+
+    Unlike `hedges_g`, this does not assume equal variances, which is why
+    `welch_t` reports it: a Welch test that deliberately drops the
+    equal-variance assumption should not have its effect size smuggle the
+    assumption back in through a pooled SD. Both the J small-sample
+    correction and the noncentral-t interval use the Welch-Satterthwaite
+    df, not n1 + n2 - 2. Verified to ~1e-8 against R.
+    """
+    g1, g2 = groups
+    x = df.loc[df[group] == g1, outcome].dropna().to_numpy(dtype=float)
+    y = df.loc[df[group] == g2, outcome].dropna().to_numpy(dtype=float)
+    n1, n2 = len(x), len(y)
+    v1, v2 = x.var(ddof=1), y.var(ddof=1)
+    denom_sd = np.sqrt((v1 + v2) / 2)
+    d = (x.mean() - y.mean()) / denom_sd
+
+    hn = 2 * (n2 * v1 + n1 * v2) / (n1 * n2 * (v1 + v2))
+    se_sq1, se_sq2 = v1 / n1, v2 / n2
+    se = np.sqrt(se_sq1 + se_sq2)
+    df_welch = se**4 / (se_sq1**2 / (n1 - 1) + se_sq2**2 / (n2 - 1))
+    t_obs = (x.mean() - y.mean()) / se
+    ci_low, ci_high = _ncp_ci(t_obs, df_welch, hn, ci)
+    j = _hedges_j(df_welch)
+    return {"estimate": float(d * j), "ci_low": ci_low * j, "ci_high": ci_high * j}
+
+
+@register(
+    name="cohens_d_one_sample",
+    kind="effect",
+    stage="hypothesis",
+    code_template=(
+        "edacore.effect_sizes.cohens_d_one_sample({df}, col={col!r}, mu0={mu0}, ci={ci})"
+    ),
+)
+def cohens_d_one_sample(
+    df: pd.DataFrame, col: str, mu0: float, ci: float = 0.95
+) -> dict[str, float]:
+    """Cohen's d against a reference value: (mean(x) - mu0) / sd(x).
+
+    Matches effectsize::cohens_d(x, mu=) including its noncentral-t
+    interval (df = n - 1, hn = 1/n). Verified to ~1e-8 against R.
+    """
+    x = df[col].dropna().to_numpy(dtype=float)
+    n = len(x)
+    sd = x.std(ddof=1)
+    d = (x.mean() - mu0) / sd
+    t_obs = (x.mean() - mu0) / (sd / np.sqrt(n))
+    ci_low, ci_high = _ncp_ci(t_obs, n - 1, 1 / n, ci)
+    return {"estimate": float(d), "ci_low": ci_low, "ci_high": ci_high}
+
+
+@register(
     name="glass_delta",
     kind="effect",
     stage="hypothesis",
@@ -446,6 +623,44 @@ def cliffs_delta(
 # --------------------------------------------------------------------------
 # Paired
 # --------------------------------------------------------------------------
+
+
+@register(
+    name="rank_biserial_one_sample",
+    kind="effect",
+    stage="hypothesis",
+    code_template=(
+        "edacore.effect_sizes.rank_biserial_one_sample({df}, col={col!r}, mu0={mu0}, ci={ci})"
+    ),
+)
+def rank_biserial_one_sample(
+    df: pd.DataFrame, col: str, mu0: float, ci: float = 0.95
+) -> dict[str, float]:
+    """Rank-biserial correlation against a reference value: the signed-rank
+    version, computed on (x - mu0). Matches effectsize::rank_biserial(mu=)
+    including its analytic (non-bootstrap) CI, to ~1e-16.
+    """
+    x = df[col].dropna().to_numpy(dtype=float)
+    return _signed_rank_biserial(x - mu0, ci)
+
+
+@register(
+    name="rank_biserial_paired",
+    kind="effect",
+    stage="hypothesis",
+    code_template=("edacore.effect_sizes.rank_biserial_paired({df}, a={a!r}, b={b!r}, ci={ci})"),
+)
+def rank_biserial_paired(df: pd.DataFrame, a: str, b: str, ci: float = 0.95) -> dict[str, float]:
+    """Rank-biserial correlation for paired measurements, on (a - b).
+
+    Matches effectsize::rank_biserial(a, b, paired=TRUE) including its
+    analytic CI, to ~1e-16. Note the standard error differs from the
+    independent-samples one in `rank_biserial` -- the signed-rank statistic
+    has a different null variance from Mann-Whitney's U.
+    """
+    paired = df[[a, b]].dropna()
+    diffs = (paired[a] - paired[b]).to_numpy(dtype=float)
+    return _signed_rank_biserial(diffs, ci)
 
 
 @register(
@@ -861,3 +1076,66 @@ def cohens_h(
         "ci_low": float(h - z * se_arcsin),
         "ci_high": float(h + z * se_arcsin),
     }
+
+
+@register(
+    name="cohens_h_one_sample",
+    kind="effect",
+    stage="hypothesis",
+    code_template=("edacore.effect_sizes.cohens_h_one_sample({df}, col={col!r}, p0={p0}, ci={ci})"),
+)
+def cohens_h_one_sample(
+    df: pd.DataFrame, col: str, p0: float, ci: float = 0.95
+) -> dict[str, float]:
+    """Cohen's h against a reference proportion:
+    2*asin(sqrt(p_hat)) - 2*asin(sqrt(p0)).
+
+    h(p) is strictly increasing in p, so the exact (Clopper-Pearson)
+    interval for p maps bound-for-bound onto an exact interval for h --
+    no normal approximation, unlike the two-sample `cohens_h`. Verified
+    against the same transform applied to `stats::binom.test`'s interval
+    in R.
+    """
+    x = df[col].dropna().to_numpy(dtype=float)
+    n = len(x)
+    successes = int(x.sum())
+    p_low, p_high = _clopper_pearson_ci(successes, n, ci)
+
+    def _h(p: float) -> float:
+        return float(2 * np.arcsin(np.sqrt(p)) - 2 * np.arcsin(np.sqrt(p0)))
+
+    return {"estimate": _h(successes / n), "ci_low": _h(p_low), "ci_high": _h(p_high)}
+
+
+@register(
+    name="cohens_w_gof",
+    kind="effect",
+    stage="hypothesis",
+    code_template=(
+        "edacore.effect_sizes.cohens_w_gof({df}, col={col!r}, expected={expected!r}, ci={ci})"
+    ),
+)
+def cohens_w_gof(
+    df: pd.DataFrame, col: str, expected: dict[str, float], ci: float = 0.95
+) -> dict[str, float]:
+    """Cohen's w for a goodness-of-fit test: sqrt(chi2/n) against reference
+    proportions, rather than against independence in a two-way table.
+
+    Matches effectsize::cohens_w(x, p=) exactly, including its one-sided
+    interval: ci_low by noncentral chi-square inversion, ci_high at the
+    largest w these reference proportions admit, sqrt(1/min(p) - 1) -- not
+    1, and not `cohens_w`'s sqrt(min(nrow, ncol) - 1).
+    """
+    observed_counts = df[col].value_counts()
+    categories = list(expected.keys())
+    observed = np.array([float(observed_counts.get(c, 0)) for c in categories])
+    probs = np.array([expected[c] for c in categories], dtype=float)
+    n = float(observed.sum())
+    expected_counts = probs * n
+
+    chi2 = float(np.sum((observed - expected_counts) ** 2 / expected_counts))
+    dof = float(len(categories) - 1)
+    estimate = float(np.sqrt(chi2 / n))
+    ci_low = float(np.sqrt(_ncx2_ci_low(chi2, dof, ci) / n))
+    ci_high = float(np.sqrt(1 / probs.min() - 1))
+    return {"estimate": estimate, "ci_low": ci_low, "ci_high": ci_high}

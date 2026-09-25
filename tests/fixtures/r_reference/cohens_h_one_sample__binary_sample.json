@@ -1,0 +1,1 @@
+{"r_function":"h(p)=2*asin(sqrt(p))-2*asin(sqrt(p0)) at stats::binom.test's Clopper-Pearson bounds","data":"binary_sample.csv","p0":0.5,"estimate":-0.2013579207903309,"ci_low":-0.4653737573863135,"ci_high":0.06924444758399373}

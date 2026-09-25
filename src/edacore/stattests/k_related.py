@@ -27,7 +27,7 @@ from scipy import stats
 
 from edacore.assumptions import _helmert_contrasts, check_sphericity_mauchly
 from edacore.contracts import AssumptionCheck, TestResult
-from edacore.effect_sizes import kendalls_w, magnitude_label
+from edacore.effect_sizes import kendalls_w, magnitude_label, partial_eta_squared_from_f
 from edacore.registry import register
 from edacore.stattests._shared import NanPolicy
 
@@ -88,11 +88,17 @@ def _clean_wide(
     estimand="mean of the outcome across k related (within-subject) conditions",
     code_template=(
         "edacore.stattests.k_related.repeated_measures_anova("
-        "{df}, dv={dv!r}, subject={subject!r}, within={within!r}, nan_policy={nan_policy!r})"
+        "{df}, dv={dv!r}, subject={subject!r}, within={within!r}, ci={ci}, "
+        "nan_policy={nan_policy!r})"
     ),
 )
 def repeated_measures_anova(
-    df: pd.DataFrame, dv: str, subject: str, within: str, nan_policy: NanPolicy = "omit"
+    df: pd.DataFrame,
+    dv: str,
+    subject: str,
+    within: str,
+    ci: float = 0.95,
+    nan_policy: NanPolicy = "omit",
 ) -> TestResult:
     warnings: list[str] = []
     wide = _clean_wide(df, dv, subject, within, nan_policy, warnings)
@@ -112,6 +118,10 @@ def repeated_measures_anova(
     f_stat = (ss_condition / df1) / (ss_error / df2)
     pes = ss_condition / (ss_condition + ss_error)
     p_uncorrected = float(stats.f.sf(f_stat, df1, df2))
+    # The sphericity correction changes the test's df, not the effect
+    # size: effectsize::eta_squared on the afex fit returns exactly
+    # F_to_eta2 at the UNCORRECTED df (checked against R).
+    pes_ci = partial_eta_squared_from_f(f_stat, df1, df2, ci=ci)
 
     contrasts = _helmert_contrasts(k)
     y = mat @ contrasts.T
@@ -145,6 +155,7 @@ def repeated_measures_anova(
         p_value=p_gg,
         effect_size=float(pes),
         effect_size_name="partial_eta_squared",
+        effect_size_ci=(pes_ci["ci_low"], pes_ci["ci_high"]),
         effect_magnitude=magnitude_label(float(pes), "partial_eta_squared"),
         n={subject: n_subjects},
         warnings=warnings,
