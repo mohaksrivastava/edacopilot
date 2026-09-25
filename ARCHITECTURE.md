@@ -960,7 +960,7 @@ alpha: 0.05
 normality:
   method: [shapiro, descriptive, qq]     # all must PASS for "normal"
   borderline_is: fail
-  clt_shortcut: false
+  clt_shortcut: none                     # no large-sample escape at all
 variance:
   method: levene_median
   borderline_is: fail
@@ -986,7 +986,7 @@ alpha: 0.05
 normality:
   method: [descriptive]
   borderline_is: pass
-  clt_shortcut: { min_n_per_group: 30, max_abs_skew: 2 }   # legitimate large-sample reasoning
+  clt_shortcut: cochran      # n > 25*skew^2 per group (Cochran 1977)
 variance:
   strategy: always_robust        # always use Welch-type methods; no variance test needed
 method_pool_tags: [parametric, nonparametric]
@@ -1038,7 +1038,8 @@ def pick(persona, candidate_set) -> Candidate | None:
     sort by persona.prefer
     return pool[0]
 ```
-Persona reclassification may only *relax soft* assumptions via rules listed in its YAML, and only in documented, defensible ways (CLT shortcut with thresholds). It can never touch hard assumptions.
+Persona reclassification may only *relax soft* assumptions via rules listed in its YAML, and only in documented, defensible ways (the CLT shortcut). It can never touch hard assumptions.
+
 
 ### 8.3 Divergence detection
 Two proposals are "the same" if they share `function` and materially identical `params`. Group personas by proposal:
@@ -1487,6 +1488,72 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-25 — M4.1 (tag `m4.1`)
+Pre-M5 hardening. No new milestone scope; three gaps closed and one
+threshold replaced.
+
+- **Status tests for every assumption check**
+  (`tests/unit/edacore/test_check_statuses.py`). The R-fixture tests prove
+  each check computes the right *number*; nothing proved it reached the
+  right *verdict* from that number. `check_monotonicity` matched R's
+  Spearman rho to 1e-9 for two milestones while reporting FAIL on perfectly
+  monotone data. All 29 registered checks now have a clean dataset they
+  must not FAIL on and a violating dataset they must FAIL on.
+
+  Asserted across ten seeds, not one, and this is the point of the file:
+  these are 5%-size tests, so they reject clean data about once in twenty
+  runs by construction. A single hand-picked seed would pass for a correct
+  check and for one that is wrong 60% of the time alike. The requirement is
+  "never FAIL on clean data, and PASS in at least 8 of 10" — which an
+  inverted check fails instantly (the pre-M4 `check_monotonicity` scored
+  0/10) — plus "FAIL on all 10 violating seeds", since a violation built to
+  be unambiguous should leave no room for leniency.
+
+  **No further wrong statuses were found.** The two that initially looked
+  wrong were not: `check_linearity` rejecting linear data was a chance
+  rejection at the nominal 5% rate (it passes 10/10 with the seed band),
+  and `check_normality_descriptive` returning BORDERLINE on exponential
+  data is its documented rule (skew 2, excess kurtosis 6 sit inside the
+  BORDERLINE band) — the violating dataset was strengthened to lognormal
+  rather than the check changed.
+- **Assumption-vocabulary invariant**
+  (`tests/unit/edacopilot/test_assumption_registry_invariant.py`). Section
+  5.4 lets a function declare assumptions as free strings, so a typo or a
+  copied method can name one the engine has never heard of. Every hard and
+  soft assumption on every registered function — not just hypothesis tests
+  — must now resolve to a registered check or to an explicit ask-user
+  handler returning UNTESTABLE, and each resolution must produce real
+  evidence with a fact_id, a threshold and a consequence. Both directions
+  are asserted: an undeclared resolver is dead code that reads as live
+  behaviour, so that fails too. Verified to fail as intended by registering
+  a function with a bogus assumption.
+- **`clt_shortcut` is now Cochran's rule**: the large-sample condition is
+  met, per group, when `n > 25 * skew^2`. It replaces the flat pair
+  (`LARGE_N_FOR_CLT = 100`, `MAX_SKEW_FOR_CLT = 2`), which answered the
+  wrong question — whether n is "big" in the abstract rather than big
+  *relative to how skewed this sample is*. Cochran's rule scales the
+  requirement with the problem, and the verdict now names the binding group
+  and its arithmetic ("group 'F' has skew 1.89, so it needs n > 89.3 and
+  has 38"). Section 8.1 updated: the consultant's `clt_shortcut: cochran`,
+  the professor's `clt_shortcut: none`.
+
+  **Section 7.4 is unchanged**: at n = 38/41 with skew 1.89/1.70 the rule
+  requires n > 89.3 and n > 72.6, so the escape cannot fire and `welch_t`
+  stays CAVEAT. One scenario did change, for the better: on
+  `heteroscedastic_groups` (n = 60/25, near-symmetric) Cochran's rule is
+  met, so `welch_t` becomes ELIGIBLE and only `student_t` is caveated —
+  which is exactly what Section 15.3's "Student t → CAVEAT; Welch
+  preferred" describes.
+
+  **What it does not cover**: Cochran's rule bounds SKEWNESS. A symmetric
+  heavy-tailed sample has skew near zero and satisfies it at any n, even
+  though the sample variance a t-test leans on is badly behaved. The
+  normality checks still run and are still reported as evidence, so the
+  failure stays visible — it simply no longer produces a caveat by itself.
+  `heavy_tails_small_n` still caveats the parametric methods because its
+  sample skew is large (2.73 at n=12), not because the rule catches heavy
+  tails.
 
 ### 2026-09-25 — M4 (tag `m4`)
 The deterministic eligibility engine (Section 7), in

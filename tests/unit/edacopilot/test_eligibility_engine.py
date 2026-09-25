@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from edacopilot.eligibility import (
     CheckCache,
@@ -20,7 +19,7 @@ from edacopilot.eligibility import (
     select_candidates,
     validate_spec,
 )
-from edacopilot.eligibility.checks import RESOLVERS, ResolutionContext, resolve
+from edacopilot.eligibility.checks import ResolutionContext, resolve
 from edacopilot.eligibility.rules import ALL_FAMILIES, PENDING_GOALS, RULES
 from edacore.contracts import CheckStatus, Eligibility
 from edacore.registry import registry
@@ -54,26 +53,10 @@ def _validated(df: pd.DataFrame) -> QuestionSpec:
 # --------------------------------------------------------------------------
 
 
-def test_every_declared_assumption_has_a_resolver() -> None:
-    """An unresolvable assumption is worse than a missing one: the engine
-    would report a method as eligible without ever having checked it. The
-    resolver raises rather than skipping, and this proves none is missing."""
-    declared: set[str] = set()
-    for spec in registry.list(stage="hypothesis", kind="test"):
-        declared |= set(spec.assumptions.hard) | set(spec.assumptions.soft)
-    assert declared <= set(RESOLVERS), sorted(declared - set(RESOLVERS))
-
-
-def test_an_unknown_assumption_raises_rather_than_passing_silently() -> None:
-    df = _clean_two_groups()
-    ctx = ResolutionContext(
-        df=df,
-        spec=_validated(df),
-        variables={"outcome": "value", "group": "group"},
-        cache=CheckCache(df),
-    )
-    with pytest.raises(KeyError, match="no resolver"):
-        resolve("something_nobody_implemented", ctx)
+# The assumption-vocabulary invariant (every declared assumption resolves to
+# a check or an explicit ask-user handler) lives in
+# test_assumption_registry_invariant.py, which owns it for the whole
+# registry rather than just the hypothesis stage.
 
 
 def test_no_hard_assumption_ever_resolves_to_borderline() -> None:

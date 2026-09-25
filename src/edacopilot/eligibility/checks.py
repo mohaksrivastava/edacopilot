@@ -27,6 +27,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from edacore.contracts import AssumptionCheck, CheckStatus, SemanticType
 from edacore.profiling import infer_semantic_types
@@ -34,19 +35,25 @@ from edacore.registry import registry
 
 from .spec import Design, QuestionSpec
 
-# Per-group n at which the CLT is taken to carry a mean-based test even
-# though a formal normality test rejects. Above this (with no extreme
-# skew), Shapiro-Wilk rejects almost any real sample for reasons that do
-# not matter to a t-test's own behaviour.
+# Cochran's rule (Cochran 1977): a group is large enough for the CLT to
+# carry a mean-based test when
 #
-# This threshold is a CONVENTION, not a result -- like Section 6.8's
-# effect-size bands. It is set high deliberately: Section 7.4's worked
-# example has n = 38/41 with normality FAIL and expects a CAVEAT, so the
-# escape must not fire at moderate n. Persona policies (Section 8.1) apply
-# their own, stricter rules on top; this is only the floor below which the
-# engine will not soften a normality failure at all.
-LARGE_N_FOR_CLT = 100
-MAX_SKEW_FOR_CLT = 2.0
+#     n > COCHRAN_SKEW_FACTOR * skew^2
+#
+# This replaced a pair of flat thresholds (n >= 100 and |skew| < 2) in
+# M4.1. The flat version answered the wrong question -- whether n is "big"
+# in the abstract, rather than big *relative to how skewed this sample
+# is*. Cochran's rule scales the requirement with the problem: a
+# near-symmetric sample needs almost no n, a badly skewed one needs a lot.
+#
+# WHAT IT DOES NOT COVER: Cochran's rule is about SKEWNESS. It says
+# nothing about heavy tails. A symmetric heavy-tailed sample (t with low
+# df, say) has skew near zero, so the rule is satisfied at any n even
+# though the sample variance a t-test leans on is badly behaved. The
+# formal normality checks still run and are still reported as evidence, so
+# the failure stays visible -- but it no longer produces a caveat by
+# itself. See ARCHITECTURE.md Section 18's M4.1 entry.
+COCHRAN_SKEW_FACTOR = 25.0
 
 # A "variable map": canonical role -> column name. Each method family builds
 # one from a QuestionSpec (which of `x`/`y` is the binary column, where the
@@ -322,15 +329,6 @@ def _normality_evidence(ctx: ResolutionContext) -> list[AssumptionCheck]:
     ]
 
 
-def _group_sizes(ctx: ResolutionContext) -> list[int]:
-    outcome, group = ctx.column("outcome", "variable"), ctx.column("group")
-    if outcome is None:
-        return []
-    if group is None:
-        return [int(ctx.df[outcome].notna().sum())]
-    return [int(rows[outcome].notna().sum()) for _, rows in ctx.df.groupby(group, observed=True)]
-
-
 # --------------------------------------------------------------------------
 # Resolvers
 # --------------------------------------------------------------------------
@@ -340,51 +338,103 @@ def _resolve_normality(ctx: ResolutionContext) -> Resolution:
     return Resolution(_normality_evidence(ctx))
 
 
-def _resolve_normality_or_large_n(ctx: ResolutionContext) -> Resolution:
-    """Normality, with the CLT escape that Section 6.7's "normality or large
-    n" actually names.
+def cochran_requirement(skew: float) -> float:
+    """The per-group n Cochran's rule demands at this sample skewness."""
+    return COCHRAN_SKEW_FACTOR * skew**2
 
-    Shapiro-Wilk's null is *exact* normality, which no real sample satisfies;
-    at large n it therefore rejects on deviations a mean-based test does not
-    care about. So above `LARGE_N_FOR_CLT` per group, and with no extreme
-    skew, the failure is reported as a PASS carrying the reason -- but the
-    underlying Shapiro checks stay in the evidence, so nothing is hidden.
+
+def _group_label(label: str) -> str:
+    return f"group '{label}' " if label else "the sample "
+
+
+def _normality_scope(outcome: str, label: str) -> dict[str, str]:
+    return {"variable": outcome} | ({"group": label} if label else {})
+
+
+def _group_skew_and_n(
+    ctx: ResolutionContext, outcome: str, group: str | None
+) -> list[tuple[str, int, float]]:
+    """(label, n, skewness) per group, skipping any group too small for a
+    skewness estimate to mean anything."""
+    if group is None:
+        groups = {"": ctx.df[outcome].dropna().to_numpy(dtype=float)}
+    else:
+        groups = {
+            str(level): rows[outcome].dropna().to_numpy(dtype=float)
+            for level, rows in ctx.df.groupby(group, observed=True)
+        }
+    return [
+        (label, len(values), float(stats.skew(values, bias=True)))
+        for label, values in groups.items()
+        if len(values) >= 3
+    ]
+
+
+def _resolve_normality_or_large_n(ctx: ResolutionContext) -> Resolution:
+    """Normality, with the large-sample escape Section 6.7's "normality or
+    large n" names, decided by Cochran's rule.
+
+    Shapiro-Wilk's null is *exact* normality, which no real sample
+    satisfies, so it rejects on deviations a mean-based test does not care
+    about -- and the more data there is, the more reliably it does so.
+    Cochran's rule answers the question that actually matters: is n large
+    enough *for this much skew*? It requires n > 25 * skew^2 in every
+    group.
+
+    Either way the rule's verdict REPLACES the normality checks as the
+    graded fact. It cannot merely sit beside them: when the rule is met,
+    the failure it exists to excuse would still make the method a caveat.
+    The normality checks stay as evidence, so nothing is hidden.
     """
     checks = _normality_evidence(ctx)
     if all(c.status is not CheckStatus.FAIL for c in checks):
         return Resolution(checks)
 
-    sizes = _group_sizes(ctx)
     outcome = ctx.column("outcome", "variable")
-    if not sizes or outcome is None or min(sizes) < LARGE_N_FOR_CLT:
+    if outcome is None:
         return Resolution(checks)
 
-    descriptive = [c for c in checks if c.method == "descriptive_skew_kurtosis"]
-    skews = [abs(c.statistic) for c in descriptive if c.statistic is not None]
-    if skews and max(skews) >= MAX_SKEW_FOR_CLT:
+    per_group = _group_skew_and_n(ctx, outcome, ctx.column("group"))
+    if not per_group:
         return Resolution(checks)
 
-    # The CLT verdict REPLACES the Shapiro failures as the graded fact --
-    # it does not sit alongside them, or the failure it exists to excuse
-    # would still make the method a caveat. The Shapiro checks stay as
-    # evidence, so the user still sees exactly what was rejected.
+    # The binding group is the one furthest from meeting the rule.
+    label, n, skew = min(per_group, key=lambda item: item[1] - cochran_requirement(item[2]))
+    required = cochran_requirement(skew)
+    passes = all(n_i > cochran_requirement(skew_i) for _, n_i, skew_i in per_group)
+
+    if passes:
+        threshold = (
+            f"Cochran's rule (n > 25*skew^2) holds in every group; the tightest is "
+            f"{_group_label(label)}with skew {skew:.3g}, needing n > {required:.3g} "
+            f"and having {n}"
+        )
+        consequence = (
+            "At this size, for this much skew, the sampling distribution of the mean is "
+            "close enough to normal for a mean-based test; a formal normality test here "
+            "is rejecting deviations that do not affect it."
+        )
+    else:
+        threshold = (
+            f"Cochran's rule (n > 25*skew^2) needs {_group_label(label)}to have "
+            f"n > {required:.3g} for its skew of {skew:.3g}; it has {n}"
+        )
+        consequence = (
+            "This sample is skewed enough, for its size, that the mean's sampling "
+            "distribution is not yet symmetric -- so a test built on it can be "
+            "off-centre, not merely imprecise."
+        )
+
     return Resolution(
         graded=[
             _verdict(
                 "normality_or_large_n",
-                "central_limit_theorem",
-                passes=True,
-                threshold=(
-                    f"every group n >= {LARGE_N_FOR_CLT} and |skew| < {MAX_SKEW_FOR_CLT}, so the "
-                    "sampling distribution of the mean is approximately normal even though the "
-                    "data is not"
-                ),
-                consequence=(
-                    "At this sample size a formal normality test rejects deviations that do "
-                    "not affect a mean-based test; the CLT covers them."
-                ),
-                scope={"variable": outcome},
-                statistic=float(min(sizes)),
+                "cochran_rule",
+                passes=passes,
+                threshold=threshold,
+                consequence=consequence,
+                scope=_normality_scope(outcome, label),
+                statistic=float(n),
             )
         ],
         evidence=checks,

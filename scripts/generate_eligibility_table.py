@@ -17,11 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from edacopilot.eligibility.checks import (
-    LARGE_N_FOR_CLT,
-    MAX_SKEW_FOR_CLT,
-    RESOLVERS,
-)
+from edacopilot.eligibility.checks import COCHRAN_SKEW_FACTOR, RESOLVERS
 from edacopilot.eligibility.rules import ALL_FAMILIES, PENDING_GOALS, RULES
 from edacopilot.eligibility.rules.distribution_fit import TS_STATIONARITY_METHODS
 from edacore.registry import registry
@@ -60,9 +56,11 @@ DECIDED_BY: dict[str, tuple[str, str]] = {
     "normality": ("check_normality_shapiro + check_normality_descriptive", "per group"),
     "normality_or_large_n": (
         "check_normality_shapiro + check_normality_descriptive",
-        f"as `normality`, except that a failure is waived when every group has "
-        f"n >= {LARGE_N_FOR_CLT} and \\|skew\\| < {MAX_SKEW_FOR_CLT} (the CLT escape, a "
-        f"CONVENTION not a result); the Shapiro results are still reported as evidence",
+        f"as `normality`, except that Cochran's rule decides it: the large-sample "
+        f"condition is met when n > {COCHRAN_SKEW_FACTOR:.0f}*skew^2 in every group, and "
+        f"meeting it waives the normality failure. Cochran's rule is about SKEW only -- it "
+        f"says nothing about heavy tails, which a near-symmetric heavy-tailed sample can "
+        f"have while satisfying it. The normality results are still reported as evidence",
     ),
     "normality_of_differences": (
         "check_normality_shapiro",

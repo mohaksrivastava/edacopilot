@@ -14,6 +14,7 @@ plumbing works, and the plumbing is not where these mistakes happen.
 from __future__ import annotations
 
 import pytest
+from scipy import stats
 
 from edacopilot.eligibility import (
     AmbiguousSpecError,
@@ -139,13 +140,18 @@ def test_heavy_tails_small_n_caveats_the_parametric_methods() -> None:
     assert candidates.get("mann_whitney").eligibility is Eligibility.ELIGIBLE
 
 
-def test_large_n_escape_does_not_fire_at_small_n() -> None:
-    """`normality_or_large_n` waives a normality failure only above
-    `LARGE_N_FOR_CLT`. If that threshold ever drops far enough to cover
-    n=12, this scenario would silently stop warning."""
-    from edacopilot.eligibility.checks import LARGE_N_FOR_CLT
+def test_cochrans_rule_does_not_waive_normality_at_this_n_and_skew() -> None:
+    """`normality_or_large_n` is decided by Cochran's rule: n > 25*skew^2
+    per group. Here the skew is large enough that the requirement is an
+    order of magnitude above the actual n, so the escape cannot fire --
+    which is why the parametric caveat above is a statement about the
+    engine and not an accident of the seed."""
+    from edacopilot.eligibility.checks import cochran_requirement
 
-    assert LARGE_N_FOR_CLT > 12
+    df = heavy_tails_small_n()
+    for _, rows in df.groupby("group"):
+        values = rows["value"].to_numpy(float)
+        assert len(values) < cochran_requirement(float(stats.skew(values, bias=True)))
 
 
 # --------------------------------------------------------------------------

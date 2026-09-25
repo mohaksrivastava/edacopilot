@@ -46,7 +46,7 @@ INELIGIBLE -- that is a question to ask, not a verdict about the data.
 | `no_influential_outliers` | `check_influential_outliers` | max Cook's D > 1 fail, > 0.5 borderline |
 | `normality` | `check_normality_shapiro` + `check_normality_descriptive` | per group |
 | `normality_of_differences` | `check_normality_shapiro` | on the per-subject differences, pivoted from long format when needed |
-| `normality_or_large_n` | `check_normality_shapiro` + `check_normality_descriptive` | as `normality`, except that a failure is waived when every group has n >= 100 and \|skew\| < 2.0 (the CLT escape, a CONVENTION not a result); the Shapiro results are still reported as evidence |
+| `normality_or_large_n` | `check_normality_shapiro` + `check_normality_descriptive` | as `normality`, except that Cochran's rule decides it: the large-sample condition is met when n > 25*skew^2 in every group, and meeting it waives the normality failure. Cochran's rule is about SKEW only -- it says nothing about heavy tails, which a near-symmetric heavy-tailed sample can have while satisfying it. The normality results are still reported as evidence |
 | `normality_within_groups` | `check_normality_shapiro` | split by the binary column |
 | `np_at_least_10` | `check_proportion_counts` | >= 10 successes and >= 10 failures per group |
 | `numeric` | `check_measurement_level` | continuous or discrete |
