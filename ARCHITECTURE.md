@@ -1040,11 +1040,64 @@ def pick(persona, candidate_set) -> Candidate | None:
 ```
 Persona reclassification may only *relax soft* assumptions via rules listed in its YAML, and only in documented, defensible ways (the CLT shortcut). It can never touch hard assumptions.
 
+Implemented in `edacopilot/personas/` (M5). The policies are loaded and
+schema-validated from the YAML files with `extra="forbid"`, so a misspelled
+key is a load-time error rather than a persona that silently stops applying
+one of its own rules. There are exactly three relaxation/tightening rules,
+and nothing else in the module can change a status:
+
+| Rule | Direction | Effect |
+|---|---|---|
+| `normality.clt_shortcut: cochran` | relax | clears a **normality** caveat when Cochran's rule is met |
+| `normality.borderline_is: pass` | relax | clears a caveat *all* of whose causes are BORDERLINE; one FAIL anywhere blocks it |
+| `variance.strategy: always_robust` | tighten | declines to propose any method that assumes equal variance |
+
+`borderline_is: pass` being blocked by a single FAIL is the load-bearing
+detail: `normality.method` lists the checks a persona *cites*, not ones it
+may ignore. A persona that could discard a Shapiro FAIL by leaving
+`shapiro` off its list would be skipping an assumption silently, which is
+what rule 2 exists to prevent.
+
+Note that `normality_or_large_n` is already decided by Cochran's rule
+inside the eligibility engine, because Section 6.7 grants those methods
+the escape by name. The persona shortcut therefore only bites on methods
+declaring plain `normality` — one-way ANOVA, Alexander–Govern, two-way
+ANOVA, repeated-measures ANOVA. The engine records Cochran's verdict on
+any family containing a normality-family assumption, so a persona never
+depends on whether some *other* candidate happened to surface it.
+
+Ranking: the persona's `prefer` keys are applied in order as sort
+criteria, with the eligibility engine's own ranking as the final tie-break
+so the order is total and stable (rule 7). An unrecognised `prefer` key is
+a load-time error — silently skipping it would leave the persona ranking by
+something other than what its file says.
+
+**The CLT shortcut is Cochran's rule** (`clt_shortcut: cochran`): the
+large-sample condition is met, per group, when `n > 25 * skew^2`. It
+replaced a pair of flat thresholds (`min_n_per_group: 30`,
+`max_abs_skew: 2`) in M4.1, because those answered the wrong question —
+whether n is "big" in the abstract rather than big *relative to how skewed
+this sample is*. Cochran's rule scales the requirement with the problem: a
+near-symmetric sample needs almost no n, a badly skewed one needs a lot.
+The same rule decides `normality_or_large_n` in the eligibility engine
+(`eligibility/checks.py`), so a persona's shortcut is either on or off, not
+a second, different threshold.
+
+It bounds SKEWNESS only, and says nothing about heavy tails: a symmetric
+heavy-tailed sample has skew near zero and satisfies it at any n. The
+formal normality checks still run and are still reported, so the failure
+stays visible; it simply no longer produces a caveat by itself. The
+professor keeps `clt_shortcut: none` precisely because of cases like that.
 
 ### 8.3 Divergence detection
 Two proposals are "the same" if they share `function` and materially identical `params`. Group personas by proposal:
 - 1 group → **Consensus card**: the method, one-line reason, the diagnostics table (collapsed), and "All three personas agree."
 - 2–3 groups → **Divergence card**: one column per distinct proposal, labelled with the persona(s), plus a comparison section.
+
+`docs/persona_picks.md` renders every trap scenario against all three
+personas, with the template rationale each would show. Like the eligibility
+table it is generated (`scripts/generate_persona_picks.py`) with a test
+that fails if the committed file goes stale.
 
 ### 8.4 Rationale generation (LLM)
 Input: `CandidateSet`, persona picks, persona `explanation_style`, relevant `AssumptionCheck`s with fact IDs.
@@ -1488,6 +1541,78 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-25 — M5 (tag `m5`)
+The persona engine (Section 8), deterministic parts, in
+`edacopilot/personas/`. Section 8.4's LLM-written rationales stay for M9;
+what is here is Section 10.5's fallback, which is also how the whole test
+suite runs. Deliverable for review: `docs/persona_picks.md`.
+
+- **Section 7.4 reproduces exactly**: Professor + Consultant →
+  `mann_whitney`, Maverick → `yuen_trimmed_t`, as a divergence card with
+  two proposals (the first merged, the second separate). The spec's own
+  stated reason for the consultant's pick also holds: its CLT shortcut does
+  not fire, because Cochran's rule needs n > 89 for a skew of 1.89 and
+  there are 38.
+- **Rule 2 is a property test, not a spot check.** `pick` can reach a
+  candidate by four routes — the eligible pool, the least-caveated
+  fallback, and two relaxation rules — and a targeted test only proves the
+  route it walks. Hypothesis drives random data (normal, lognormal,
+  heavy-tailed, uniform, ordinal; 2–4 groups; n from 3 to 60; equal and
+  unequal spread) through the engine and asserts no persona ever proposes
+  an INELIGIBLE candidate, never picks outside its own method pool, and
+  never relaxes anything that was not a CAVEAT to begin with.
+- **Personas are data, and the schema is what keeps them honest.**
+  `extra="forbid"` throughout: a misspelled `method_pool_tag` would
+  otherwise leave the persona with an empty pool and no indication why it
+  had stopped proposing anything. An unrecognised `prefer` key is likewise
+  a load error, since silently skipping it would leave the persona ranking
+  by something other than its file. A fourth persona file is rejected —
+  Section 8 defines three, and a fourth changes what a divergence card
+  means.
+- **`borderline_is: pass` is blocked by a single FAIL.** This is the one
+  design decision in M5 worth flagging. Section 8.1's consultant lists
+  `normality.method: [descriptive]`, which could be read as licence to
+  ignore a Shapiro FAIL it never consults. It is not read that way here:
+  `method` lists the checks a persona *cites*, and relaxation happens only
+  through the two named rules. A persona that could reach eligibility by
+  declining to look at a check would be skipping an assumption silently,
+  which is exactly what rule 2 exists to prevent — and it would also break
+  7.4, where the consultant is supposed to land on the same rank-based
+  method as the professor.
+- **`always_robust` means always.** The consultant now declines any method
+  declaring `equal_variance`, not merely when the variance check fails.
+  That is what its YAML comment says ("always use Welch-type methods; no
+  variance test needed") and it is the defensible reading: Welch costs
+  almost nothing when variances are equal, so a persona optimising for
+  fewest defensible steps has no reason to test first and then decide. The
+  visible effect is on *clean* data, where the three personas now diverge
+  three ways (Professor → Student's t, Consultant → Welch, Maverick →
+  Yuen) instead of two. 7.4 is unaffected.
+- **The engine now records Cochran's rule on any family with a
+  normality-family assumption**, whether or not a method declares
+  `normality_or_large_n`. Without that, a persona's CLT shortcut would work
+  in the ANOVA family (where `welch_anova` surfaces the fact) and silently
+  not work in the factorial family (where nothing does.)
+- **Template rationales** are built from `AssumptionCheck.consequence`, not
+  paraphrased: a rationale has to say what goes wrong, and that sentence is
+  already written for a junior analyst (Section 6.6). A test asserts every
+  number appearing in a rationale also appears in a check's own text, which
+  is rule 1 applied to the fallback layer — the template engine computes
+  nothing.
+- **One finding for your decision**: the Maverick has *no method to offer*
+  for an ordinal association question. The `ordinal_any` family offers
+  `spearman`, `kendall_tau` and `cochran_armitage_trend`, and none carries
+  a tag in the maverick's pool (`resampling`, `robust`,
+  `nonparametric_advanced`, `maverick`). That is correct given Section
+  8.1's tags, and the card says so plainly rather than inventing a pick —
+  but if the Maverick should have something to say there, the fix is to tag
+  `kendall_tau` (or `distance_correlation`, already tagged `resampling`,
+  by adding it to that family) rather than to change the pick algorithm.
+- **New declared dependency**: `pyyaml>=6`, plus `types-PyYAML` for mypy.
+  It was already present transitively via litellm; Section 8.1's policies
+  are YAML files, so the dependency is now real rather than a happy
+  accident, and the min-versions CI leg pins it.
 
 ### 2026-09-25 — M4.1 (tag `m4.1`)
 Pre-M5 hardening. No new milestone scope; three gaps closed and one

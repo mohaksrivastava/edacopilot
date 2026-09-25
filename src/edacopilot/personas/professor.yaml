@@ -1,0 +1,25 @@
+# The Professor: strict about assumptions, conservative about claims.
+# ARCHITECTURE.md Section 8.1.
+id: professor
+display_name: "Professor"
+alpha: 0.05
+normality:
+  method: [shapiro, descriptive, qq]   # all must PASS for "normal"
+  borderline_is: fail
+  clt_shortcut: none                   # no large-sample escape at all
+variance:
+  method: levene_median
+  borderline_is: fail
+method_pool_tags: [parametric, nonparametric, exact]
+prefer: [assumptions_clearly_met, exact_over_asymptotic]
+multiple_testing: { default: holm, apply: always }
+missing:
+  prefer: [impute_iterative, add_missing_indicator]
+  max_listwise_loss_pct: 5
+  require_mechanism_discussion: true
+outliers:
+  prefer: [flag_outliers, replace_with_nan]
+  detection: [detect_modified_zscore, detect_adjusted_boxplot]
+transforms:
+  prefer: [box_cox, yeo_johnson]
+explanation_style: precise

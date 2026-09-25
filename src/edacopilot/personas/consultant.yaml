@@ -1,0 +1,24 @@
+# The Consultant: fewest defensible steps to a decision.
+# ARCHITECTURE.md Section 8.1.
+id: consultant
+display_name: "Consultant"
+alpha: 0.05
+normality:
+  method: [descriptive]
+  borderline_is: pass
+  clt_shortcut: cochran      # n > 25*skew^2 per group (Cochran 1977)
+variance:
+  strategy: always_robust    # Welch-type methods; no variance test needed
+  borderline_is: pass
+method_pool_tags: [parametric, nonparametric]
+prefer: [fewest_steps, interpretability, robust_default]
+multiple_testing: { default: holm, apply: { when_more_than: 3 } }
+missing:
+  prefer: [drop_rows_listwise, impute_simple]
+  max_listwise_loss_pct: 10
+outliers:
+  prefer: [winsorize, cap_at_fences]
+  detection: [detect_iqr]
+transforms:
+  prefer: [log_transform, log1p_transform, sqrt_transform]
+explanation_style: brief

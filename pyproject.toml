@@ -21,6 +21,10 @@ dependencies = [
   "scikit-learn",
   "scikit-posthocs",
   "pydantic>=2",
+  # Section 8.1's persona policies are YAML files. PyYAML was already
+  # present transitively (via litellm); declaring it makes the dependency
+  # real rather than a happy accident, and the min-versions CI leg pins it.
+  "pyyaml>=6",
   "litellm",
   "matplotlib",
   "ipywidgets>=8",
@@ -40,6 +44,7 @@ dev = [
   "ruff",
   "mypy",
   "pandas-stubs",
+  "types-PyYAML",
   "pre-commit",
   "nbclient",
 ]

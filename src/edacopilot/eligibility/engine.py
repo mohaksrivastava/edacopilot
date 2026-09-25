@@ -131,6 +131,21 @@ def _evaluate(function: str, ctx: ResolutionContext) -> _Evaluation:
     return _Evaluation(eligibility, reasons, [*hard_checks, *soft_checks], len(set(caveats)))
 
 
+# Assumptions whose caveats a persona's CLT shortcut may speak to.
+_NORMALITY_FAMILY = frozenset(
+    {"normality", "normality_or_large_n", "normality_of_differences", "normality_within_groups"}
+)
+
+
+def _needs_large_sample_fact(family: MethodFamily, checks: dict[str, AssumptionCheck]) -> bool:
+    if any(check.method == "cochran_rule" for check in checks.values()):
+        return False
+    return any(
+        _NORMALITY_FAMILY & (set(spec.assumptions.hard) | set(spec.assumptions.soft))
+        for spec in (registry.get(method.function) for method in family.methods)
+    )
+
+
 _RANK_ORDER = {Eligibility.ELIGIBLE: 0, Eligibility.CAVEAT: 1, Eligibility.INELIGIBLE: 2}
 
 
@@ -217,6 +232,16 @@ def select_candidates(
         )
         candidates.append(candidate)
         sort_keys.append(_rank_key(candidate, evaluation.n_caveats, method.interpretability))
+
+    # Cochran's rule is a fact about the data, not about one method, and
+    # Section 8's personas may lean on it (`clt_shortcut: cochran`) for
+    # methods that declare plain `normality`. Record it whenever any
+    # candidate has a normality-family assumption, so a persona is not
+    # left depending on whether some *other* candidate in the family
+    # happened to declare `normality_or_large_n` and surface it.
+    if _needs_large_sample_fact(family, all_checks):
+        for check in resolve("normality_or_large_n", ctx).graded:
+            all_checks.setdefault(check.fact_id, check)
 
     ranked = [c for _, c in sorted(zip(sort_keys, candidates, strict=True), key=lambda p: p[0])]
 

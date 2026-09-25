@@ -1,0 +1,23 @@
+# The Maverick: methods that assume less, even if less familiar.
+# ARCHITECTURE.md Section 8.1.
+id: maverick
+display_name: "Maverick"
+alpha: 0.05
+normality:
+  method: [shapiro, descriptive]
+  borderline_is: fail
+  clt_shortcut: none
+method_pool_tags: [resampling, robust, nonparametric_advanced, maverick]
+prefer: [robust, resampling, informative_effect_sizes]
+multiple_testing: { default: fdr_bh, apply: always }
+missing:
+  prefer: [impute_missforest, impute_knn, delta_sensitivity]
+outliers:
+  prefer: [flag_outliers]
+  detection: [detect_isolation_forest, detect_lof, detect_mahalanobis_robust]
+transforms:
+  prefer: [yeo_johnson, quantile_normal, rank_transform]
+constraints:
+  only_registered_functions: true
+  must_state_tradeoff: true
+explanation_style: curious
