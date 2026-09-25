@@ -1,0 +1,394 @@
+"""The session object and persistence (ARCHITECTURE.md, Section 12.4).
+
+A `Session` ties the three pieces of Section 12 together — the dataset
+version DAG, the provenance log, the test ledger — and makes them survive a
+kernel restart, which is not a nicety: a Jupyter session that loses its
+history on restart loses the audit trail that every result depends on.
+
+`.edacopilot/<session_id>/` holds `session.json` plus one parquet per
+version. **That directory can contain the user's data**, which is why
+`edacopilot.session.GITIGNORE_WARNING` exists and the README says so: a
+session directory committed to a shared repository is a data leak with no
+warning attached.
+
+The eligibility engine's `dataset_version` hook is wired here. Section 7.2
+caches assumption checks per data version, and the version id it caches
+under is now the DatasetStore's own — so a transform that produces `v3`
+cannot read a fact computed about `v2`. That is the correctness property
+the cache exists for, and `candidates()` is the only place it is
+established.
+"""
+
+from __future__ import annotations
+
+import inspect
+import json
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+import pandas as pd
+
+from edacopilot.eligibility import CandidateSet, CheckCache, QuestionSpec, select_candidates
+from edacopilot.personas import PersonaVerdict, propose_with_rationales
+from edacore.contracts import Candidate, PostHocResult, TestResult
+from edacore.registry import registry
+
+from .dataset_store import DatasetStore, VersionRecord
+from .ledger import AdjustMethod, LedgerEntry, TestLedger, is_posthoc
+from .provenance import ProposalView, ProvenanceLog, Step
+
+SESSION_DIR = ".edacopilot"
+STATE_FILE = "session.json"
+STATE_VERSION = 1
+
+GITIGNORE_WARNING = (
+    f"{SESSION_DIR}/ stores your dataset as parquet alongside the session history. "
+    f"Add it to .gitignore before committing anything from this project."
+)
+
+
+class SessionNotFoundError(FileNotFoundError):
+    pass
+
+
+@dataclass
+class Session:
+    """One analysis session (Section 12)."""
+
+    session_id: str
+    store: DatasetStore
+    provenance: ProvenanceLog = field(default_factory=ProvenanceLog)
+    test_ledger: TestLedger = field(default_factory=TestLedger)
+    config: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    _caches: dict[str, CheckCache] = field(default_factory=dict, repr=False)
+
+    # ---- lifecycle ------------------------------------------------------
+
+    @classmethod
+    def start(
+        cls,
+        df: pd.DataFrame,
+        *,
+        session_id: str | None = None,
+        root: Path | str = SESSION_DIR,
+        config: dict[str, Any] | None = None,
+    ) -> Session:
+        session_id = session_id or uuid4().hex[:12]
+        directory = Path(root) / session_id
+        if (directory / STATE_FILE).exists():
+            raise FileExistsError(
+                f"session '{session_id}' already exists at {directory}; use resume() to reopen it"
+            )
+        session = cls(
+            session_id=session_id,
+            store=DatasetStore.create(df, directory),
+            config=dict(config or {}),
+        )
+        session.save()
+        return session
+
+    @property
+    def directory(self) -> Path:
+        return self.store.directory
+
+    @property
+    def state_path(self) -> Path:
+        return self.directory / STATE_FILE
+
+    # ---- data -----------------------------------------------------------
+
+    @property
+    def data(self) -> pd.DataFrame:
+        """The active head's data."""
+        return self.store.get()
+
+    @property
+    def version(self) -> str:
+        return self.store.head
+
+    @property
+    def branch(self) -> str:
+        return self.store.active_branch
+
+    def original(self) -> pd.DataFrame:
+        return self.store.get("v0")
+
+    # ---- the eligibility hook -------------------------------------------
+
+    def check_cache(self, version_id: str | None = None) -> CheckCache:
+        """The assumption-check cache for one dataset version.
+
+        One cache per version, keyed by the DatasetStore's own version id.
+        A new version therefore gets a new cache and cannot inherit a fact
+        computed about its parent -- which is the whole point of Section
+        7.2's "cached per data version".
+        """
+        version_id = version_id or self.store.head
+        if version_id not in self._caches:
+            self._caches[version_id] = CheckCache(
+                self.store.get(version_id), dataset_version=version_id
+            )
+        return self._caches[version_id]
+
+    def candidates(self, spec: QuestionSpec) -> CandidateSet:
+        """Eligible methods for a question, against the active head."""
+        version_id = self.store.head
+        return select_candidates(
+            spec,
+            self.store.get(version_id),
+            dataset_version=version_id,
+            cache=self.check_cache(version_id),
+        )
+
+    def propose(self, spec: QuestionSpec) -> PersonaVerdict:
+        return propose_with_rationales(self.candidates(spec))
+
+    # ---- accepting a step ----------------------------------------------
+
+    def accept(
+        self,
+        *,
+        stage: str,
+        chosen: Candidate | None = None,
+        chosen_via: str = "consensus",
+        spec: QuestionSpec | None = None,
+        candidates: CandidateSet | None = None,
+        verdict: PersonaVerdict | None = None,
+        override_reason: str | None = None,
+        new_data: pd.DataFrame | None = None,
+        result: TestResult | PostHocResult | None = None,
+        family: str | None = None,
+        label: str = "",
+    ) -> Step:
+        """Record an accepted step, and any new dataset version or test
+        result that came with it (Section 12.2).
+
+        `code` is rendered here rather than passed in, from the registry, so
+        the log's reproducibility claim cannot drift from what the function
+        actually is (rule 7).
+        """
+        if chosen_via == "override" and not (override_reason or "").strip():
+            raise ValueError(
+                "an override needs a typed reason (Section 7.5); it is stored in the "
+                "provenance log and emitted as a code comment on export"
+            )
+
+        step_id = self.provenance.next_step_id()
+        input_version = self.store.head
+        output_version: str | None = None
+        if new_data is not None:
+            record = self.store.add_version(new_data, created_by_step=step_id, label=label or stage)
+            output_version = record.version_id
+
+        entry: LedgerEntry | None = None
+        if result is not None:
+            entry = self._record_result(result, family=family, step_id=step_id)
+
+        step = Step(
+            step_id=step_id,
+            stage=stage,
+            branch=self.store.active_branch,
+            question=spec,
+            checks=[check.fact_id for check in (candidates.checks if candidates else [])],
+            proposals=_proposal_views(verdict),
+            chosen=chosen,
+            chosen_via=chosen_via,
+            override_reason=override_reason,
+            input_version=input_version,
+            output_version=output_version,
+            result_fact_id=entry.fact_id if entry else None,
+            code=_render_code(chosen),
+        )
+        self.provenance.append(step)
+        self.save()
+        return step
+
+    def _record_result(
+        self,
+        result: TestResult | PostHocResult,
+        *,
+        family: str | None,
+        step_id: str,
+    ) -> LedgerEntry:
+        family_label = family or "session"
+        if isinstance(result, PostHocResult) or is_posthoc(result.function):
+            return self.test_ledger.record_posthoc(
+                result,  # type: ignore[arg-type]
+                family=family_label,
+                branch=self.store.active_branch,
+                step_id=step_id,
+            )
+        return self.test_ledger.record(
+            result, family=family_label, branch=self.store.active_branch, step_id=step_id
+        )
+
+    # ---- version navigation --------------------------------------------
+
+    def undo(self) -> VersionRecord:
+        record = self.store.undo()
+        self.save()
+        return record
+
+    def branch_from(self, name: str, *, version: str | None = None) -> VersionRecord:
+        record = self.store.branch(name, from_version=version)
+        self.save()
+        return record
+
+    def switch_branch(self, name: str) -> VersionRecord:
+        record = self.store.switch_branch(name)
+        self.save()
+        return record
+
+    @property
+    def branches(self) -> list[str]:
+        return self.store.branches
+
+    # ---- reading --------------------------------------------------------
+
+    def ledger(self) -> list[dict[str, Any]]:
+        """Section 12.3's table: every test with raw and adjusted p-values."""
+        return self.test_ledger.rows()
+
+    def steps(self) -> list[dict[str, Any]]:
+        return [step.summary() for step in self.provenance.steps]
+
+    def code(self) -> str:
+        """The session as a runnable script (rule 7)."""
+        return self.provenance.code()
+
+    def set_adjust_method(self, method: AdjustMethod) -> None:
+        self.test_ledger.set_method(method)
+        self.save()
+
+    # ---- persistence (Section 12.4) -------------------------------------
+
+    def to_state(self) -> dict[str, Any]:
+        return {
+            "state_version": STATE_VERSION,
+            "session_id": self.session_id,
+            "created_at": self.created_at.isoformat(),
+            "config": self.config,
+            "store": self.store.to_state(),
+            "provenance": self.provenance.model_dump(mode="json"),
+            "ledger": self.test_ledger.model_dump(mode="json"),
+        }
+
+    def save(self) -> Path:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        # Written via a temporary file and replaced atomically: a kernel
+        # that dies mid-write would otherwise leave a truncated session.json
+        # and lose the whole history rather than the last step.
+        tmp = self.state_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(self.to_state(), indent=2), encoding="utf-8")
+        tmp.replace(self.state_path)
+        return self.state_path
+
+    @classmethod
+    def resume(cls, session_id: str, *, root: Path | str = SESSION_DIR) -> Session:
+        """Restore a session after a kernel restart (Section 12.4)."""
+        directory = Path(root) / session_id
+        state_path = directory / STATE_FILE
+        if not state_path.exists():
+            raise SessionNotFoundError(f"no session state at {state_path}")
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if state.get("state_version") != STATE_VERSION:
+            raise ValueError(
+                f"session '{session_id}' was written by state version "
+                f"{state.get('state_version')}; this build reads {STATE_VERSION}"
+            )
+
+        store_state = state["store"]
+        store = DatasetStore.restore(
+            directory=directory,
+            versions={
+                record["version_id"]: VersionRecord.model_validate(record)
+                for record in store_state["versions"]
+            },
+            branch_heads=store_state["branch_heads"],
+            active_branch=store_state["active_branch"],
+        )
+        missing = [
+            version_id for version_id in store.versions if not store.path_for(version_id).exists()
+        ]
+        if missing:
+            raise SessionNotFoundError(
+                f"session '{session_id}' is missing parquet file(s) for {missing}; the "
+                f"directory has been moved or partly deleted"
+            )
+        return cls(
+            session_id=state["session_id"],
+            store=store,
+            provenance=ProvenanceLog.model_validate(state["provenance"]),
+            test_ledger=TestLedger.model_validate(state["ledger"]),
+            config=state.get("config", {}),
+            created_at=datetime.fromisoformat(state["created_at"]),
+        )
+
+
+def _proposal_views(verdict: PersonaVerdict | None) -> list[ProposalView]:
+    if verdict is None:
+        return []
+    return [
+        ProposalView(
+            persona=pick.persona,
+            function=pick.function,
+            eligibility=pick.eligibility.value if pick.eligibility else None,
+            rationale=pick.rationale,
+            concurs_with=pick.concurs_with,
+        )
+        for pick in verdict.picks
+    ]
+
+
+def _render_code(chosen: Candidate | None) -> str:
+    """The runnable line for a step, from the registry (rule 7).
+
+    A `Candidate` carries only the params that identify the analysis -- the
+    columns and the question's own values -- because that is what the
+    eligibility engine and the personas reason about. A code template also
+    references the parameters that have defaults (`ci`, `nan_policy`,
+    `random_state`), so those are filled in from the function's own
+    signature. Rendering them explicitly rather than relying on defaults is
+    deliberate: the exported notebook should say what it ran, including the
+    seed, so someone reading it later can reproduce the number without
+    knowing this version's defaults.
+
+    A template that still cannot be rendered becomes a comment rather than
+    an exception. A step that ran is a fact, and losing the whole log
+    because one line would not render would be worse than recording that it
+    did not.
+    """
+    if chosen is None:
+        return ""
+    try:
+        params = {**_default_params(chosen.function), **dict(chosen.params)}
+        return registry.to_code(chosen.function, params)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        return f"# could not render code for {chosen.function}: {exc}"
+
+
+def _default_params(function: str) -> dict[str, Any]:
+    """Every parameter of a registered function that has a default."""
+    signature = inspect.signature(registry.get(function).func)
+    return {
+        name: parameter.default
+        for name, parameter in signature.parameters.items()
+        if parameter.default is not inspect.Parameter.empty
+    }
+
+
+def resume(session_id: str, *, root: Path | str = SESSION_DIR) -> Session:
+    """Module-level alias, so `edacopilot.resume(...)` reads as Section 12.4
+    writes it."""
+    return Session.resume(session_id, root=root)
+
+
+def list_sessions(root: Path | str = SESSION_DIR) -> list[str]:
+    base = Path(root)
+    if not base.exists():
+        return []
+    return sorted(p.name for p in base.iterdir() if (p / STATE_FILE).exists())

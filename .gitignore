@@ -18,6 +18,11 @@ htmlcov/
 
 .ipynb_checkpoints/
 
+# Session state written by edacopilot itself. It contains the user's data as
+# parquet (see the README): never commit it, including from a test run that
+# forgot to use tmp_path.
+.edacopilot/
+
 .vscode/
 .idea/
 *.swp

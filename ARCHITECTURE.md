@@ -1339,6 +1339,24 @@ class DatasetVersion(BaseModel):
 - Diagnostics are cached per `(version_id, check, scope)`.
 - Memory: keep only the active head and `v0` in memory; others load from parquet on demand.
 
+Implemented in `edacopilot/session/dataset_store.py` (M6). Three notes:
+
+- **Parquet is written with zstd, not pandas' default snappy.** Measured on
+  this project's WSL setup, a 1M-row / 5-column frame (41 MB in memory)
+  writes to `/mnt/c` in 2.12 s with snappy and 1.06 s with zstd, for 19.3 MB
+  against 12.7 MB; the same write to WSL's native filesystem takes 0.14 s.
+  The Windows drive is reached over a 9p filesystem roughly an order of
+  magnitude slower, so on a Windows-drive checkout the bottleneck is bytes
+  crossing that boundary — which makes the smaller encoding faster *and*
+  smaller. On native storage the two are within noise, so nothing is lost by
+  preferring zstd everywhere.
+- **An undo does not delete the version it moved off.** Only the branch head
+  moves, so an undo the user regrets is recoverable by switching back or
+  branching from it.
+- `v0`'s parquet cannot be overwritten (`ReadOnlyVersionError`). It is the
+  one state a session can always fall back to; a bug that rewrote it would
+  be unrecoverable rather than merely wrong.
+
 ### 12.2 ProvenanceLog
 ```python
 class Step(BaseModel):
@@ -1357,6 +1375,21 @@ class Step(BaseModel):
     timestamp: datetime
 ```
 This records the analysis only. It stores no evaluation of the user.
+
+Implemented in `edacopilot/session/provenance.py` (M6). Rule 4 is enforced
+rather than trusted: `assert_no_user_evaluation()` fails if `Step` ever
+gains a field like `warnings_ignored`, `time_taken` or `skill`, and a test
+proves the guard itself catches one. The log is append-only — an undo moves
+the dataset head, it does not erase the fact that the step happened.
+
+`Step.code` is rendered from `registry.to_code` at accept time, with the
+function's own defaults filled in from its signature. A `Candidate` carries
+only the params that identify the analysis (the columns, the question's
+values), and a code template also references the ones with defaults (`ci`,
+`nan_policy`, `random_state`). Rendering them explicitly is deliberate: the
+exported notebook should state what it ran, including the seed, so the
+number can be reproduced without knowing this version's defaults. A test
+evaluates the recorded line and checks it returns the same p-value (rule 7).
 
 ### 12.3 TestLedger
 - Every executed hypothesis test is appended with its family label (e.g. "income comparisons").
@@ -1389,6 +1422,25 @@ This records the analysis only. It stores no evaluation of the user.
 - `.edacopilot/<session_id>/session.json` (steps, ledger, config, branch heads) + parquet versions.
 - `edacopilot.resume(session_id)` restores after a kernel restart.
 - Add `.edacopilot/` to the user's `.gitignore` guidance in the README (it may contain data).
+
+Implemented in `edacopilot/session/session.py` (M6). `session.json` is
+written to a temporary file and renamed, so a kernel that dies mid-write
+costs the last step rather than the whole history. Resuming validates that
+every version's parquet is still present and says so plainly if the
+directory was moved, instead of failing later inside pandas on a path the
+user never typed.
+
+The README carries the data warning, and `.edacopilot/` is in this repo's
+own `.gitignore` too — a test run that forgets `tmp_path` should not be able
+to commit a dataset.
+
+**The eligibility hook.** `Session.candidates(spec)` passes the
+DatasetStore's own version id as Section 7.2's `dataset_version` and holds
+one `CheckCache` per version. A transform therefore produces a new version
+with a new cache, and cannot read an assumption check computed about its
+parent — which is the correctness property that cache exists for. A test
+asserts the same `fact_id` returns a different statistic across versions,
+rather than merely that the ids differ.
 
 ---
 
@@ -1580,6 +1632,89 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-25 — M6 (tag `m6`)
+The session layer (Section 12), in `edacopilot/session/`: the dataset version
+DAG, the provenance log, the test ledger, and persistence that survives a
+kernel restart.
+
+- **DatasetStore** (12.1). Every accepted transform creates a child version;
+  nothing is edited in place, which is rule 6 at the storage level. `v0`'s
+  parquet cannot be overwritten — it is the one state a session can always
+  fall back to, so a bug that rewrote it would be unrecoverable rather than
+  merely wrong. Only `v0` and the active head stay in memory, asserted via
+  `store.in_memory()` rather than assumed. An undo moves the branch head and
+  does **not** delete the version, so an undo the user regrets is
+  recoverable.
+- **Parquet uses zstd, not pandas' default snappy**, decided from
+  measurement rather than preference. 1M rows x 5 columns (41 MB in memory)
+  to `/mnt/c`: snappy 2.12 s / 19.3 MB, zstd 1.06 s / 12.7 MB. The same
+  write to WSL's native filesystem takes 0.14 s, so `/mnt/c` is roughly an
+  order of magnitude slower — it is reached over 9p — and the bottleneck is
+  bytes crossing that boundary, which is why the smaller encoding is also
+  the faster one. On native storage the two are within noise (0.10 s vs
+  0.08 s), so nothing is lost by using zstd everywhere.
+  `test_parquet_performance.py` (slow, nightly) asserts the *decision* —
+  materially smaller, not materially slower — because a wall-clock
+  assertion would fail on a loaded runner for reasons unrelated to the code.
+  It runs on `tmp_path`, which is native, so it reproduces the native rows
+  and not the `/mnt/c` ones; the size win is the half that generalises.
+- **ProvenanceLog** (12.2), append-only. Rule 4 is enforced, not trusted:
+  `assert_no_user_evaluation()` fails if `Step` ever gains a field like
+  `warnings_ignored` or `time_taken`, and a test proves the guard catches
+  one. An undo does not erase a step — "what did I do and then undo?" is a
+  fair question.
+- **`Step.code` is complete and runnable.** A `Candidate` carries only the
+  params that identify the analysis, so the first version rendered
+  `# could not render code for welch_t: code_template references '{ci}'` —
+  which would have made rule 7's promise hollow. The defaults are now filled
+  from the function's own signature, and a test evaluates the recorded line
+  and asserts it returns the same p-value. Rendering defaults explicitly is
+  deliberate: an exported notebook should say what it ran, including the
+  seed.
+- **TestLedger** (12.3). Adjusted p-values are *recomputed* after each test,
+  not accumulated, because Holm is a step-down method — adding a test
+  changes every earlier adjusted p-value, and a ledger that computed each
+  entry once would show stale numbers for all but the newest. Adjustment
+  delegates to `edacore.multiplicity.adjust_pvalues`, and the acceptance
+  test compares against that function on the same inputs for all four
+  methods. Section 12.3's rule holds exactly: an omnibus test is one entry,
+  a post-hoc is recorded but excluded from both the session adjustment and
+  the session count, and the sharpest form of that — adding a post-hoc
+  leaves every real test's adjusted p-value untouched — is asserted
+  directly.
+- **The eligibility hook is wired.** `Session.candidates()` passes the
+  DatasetStore version id as Section 7.2's `dataset_version` and keeps one
+  `CheckCache` per version, so a transform cannot read a check computed
+  about its parent. The test asserts the same `fact_id` returns a *different
+  statistic* across versions, rather than merely that the version ids
+  differ — the latter would pass even if the cache were shared.
+- **Persistence** (12.4). `session.json` is written to a temp file and
+  renamed, so a kernel dying mid-write costs the last step rather than the
+  history. `resume()` validates that every version's parquet is present and
+  says the directory was moved, instead of failing later inside pandas.
+  M6's acceptance criterion is a filesystem round-trip: a busy session
+  (tests, a transform, an override, a branch) resumed from disk has
+  `to_state()` equal to the original, identical frames for every version,
+  and can be continued.
+- **README and `.gitignore`**: `.edacopilot/` holds the user's data as
+  parquet, so the README warns about it prominently and this repo ignores it
+  too — a test run that forgets `tmp_path` should not be able to commit a
+  dataset.
+- **Serialising a `set` was not canonical**, found by the acceptance test
+  failing once in about ten full runs and passing on retry — the shape of
+  bug that gets written off as flaky. CPython iterates a set in hash-table
+  order, and two sets with the same members can iterate differently when
+  their insertion histories collided differently, which depends on the
+  per-process string hash seed. So `Candidate.tags` and
+  `QuestionSpec.confirmed_by_user` dumped in an order that was not a
+  function of their value: a session written to JSON and read back produced
+  an *equal* model whose dump differed. Both now have a `field_serializer`
+  that sorts. This matters beyond the test — non-canonical state makes
+  `session.json` diffs noisy and any state comparison unreliable — so the
+  property is pinned by its own test (built from two different insertion
+  orders), since the round-trip test cannot catch it reliably. Verified
+  across several `PYTHONHASHSEED` values.
 
 ### 2026-09-25 — M5.1 (tag `m5.1`)
 Divergence cards that only appear when the personas actually disagree. A

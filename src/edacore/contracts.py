@@ -11,7 +11,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class SemanticType(StrEnum):
@@ -95,6 +95,22 @@ class Candidate(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     tags: set[str] = Field(default_factory=set)
     estimand: str
+
+    @field_serializer("tags")
+    def _sorted_tags(self, tags: set[str]) -> list[str]:
+        """Serialise tags in a fixed order.
+
+        A `set` dumps in CPython's iteration order, which for two sets with
+        the same members can differ if their insertion histories collided
+        differently in the hash table -- and whether that happens depends on
+        the per-process string hash seed. That made a serialised `Candidate`
+        non-canonical: a session written to JSON and read back produced an
+        equal model that dumped to different bytes, roughly one process in
+        ten. Sorting makes serialisation a function of the value alone,
+        which is what persistence (Section 12.4), state comparison and
+        readable diffs all depend on.
+        """
+        return sorted(tags)
 
 
 class TestResult(BaseModel):

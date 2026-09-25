@@ -22,7 +22,7 @@ from enum import StrEnum
 from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from edacore.assumptions import check_design_crossing
 from edacore.contracts import CheckStatus, SemanticType
@@ -69,6 +69,12 @@ class QuestionSpec(BaseModel):
     user_text: str = ""
     confirmed_by_user: set[str] = Field(default_factory=set)
     ambiguities: list[str] = Field(default_factory=list)
+
+    @field_serializer("confirmed_by_user")
+    def _sorted_confirmations(self, confirmed: set[str]) -> list[str]:
+        """Serialise in a fixed order -- see `Candidate.tags` for why a set's
+        dump order is not a function of its value."""
+        return sorted(confirmed)
 
     def with_ambiguities(self, ambiguities: list[str]) -> QuestionSpec:
         return self.model_copy(update={"ambiguities": ambiguities})
