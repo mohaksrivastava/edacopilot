@@ -509,8 +509,10 @@ terms:
     factors explain; the usual reporting choice in factorial designs.
   omega_squared: >-
     A less biased version of eta-squared; prefer it when samples are small.
-  epsilon_squared: >-
-    The rank-based counterpart of eta-squared, reported alongside Kruskal-Wallis.
+  rank_epsilon_squared: >-
+    The share of the outcome's rank variation the grouping explains, reported
+    alongside Kruskal-Wallis; not the same quantity as Kelley's epsilon-squared,
+    which is computed from an ANOVA.
   kendalls_w: >-
     How much the subjects agree in their ranking of the conditions, from 0 for no
     agreement to 1 for complete agreement; the effect size for Friedman's test.
@@ -727,6 +729,8 @@ aliases:
   holm correction: holm
   benjamini hochberg: fdr_bh
   fdr: fdr_bh
+  epsilon squared: rank_epsilon_squared
+  epsilon_squared: rank_epsilon_squared
   false discovery rate: fdr_bh
   clt: central_limit_theorem
   cochrans rule: cochran_rule

@@ -206,11 +206,11 @@ def test_omega_squared_matches_r() -> None:
 def test_epsilon_squared_matches_r_point_estimate() -> None:
     df = _data("three_groups")
     ref = _ref("epsilon_squared__three_groups")
-    result = edacore.effect_sizes.epsilon_squared(df, "value", "group")
+    result = edacore.effect_sizes.rank_epsilon_squared(df, "value", "group")
     _assert_close(result["estimate"], ref["estimate"])
     assert_codegen_matches(
         registry,
-        "epsilon_squared",
+        "rank_epsilon_squared",
         {"outcome": "value", "group": "group", "ci": 0.95},
         df,
         namespace=_NAMESPACE,

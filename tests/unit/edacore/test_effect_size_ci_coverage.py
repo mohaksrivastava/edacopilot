@@ -66,7 +66,7 @@ def test_epsilon_squared_ci_coverage() -> None:
                 "group": sum(([f"g{i}"] * n_per_group for i in range(len(means))), []),
             }
         )
-        result = edacore.effect_sizes.epsilon_squared(df, "value", "group")
+        result = edacore.effect_sizes.rank_epsilon_squared(df, "value", "group")
         if result["ci_low"] <= true_value <= result["ci_high"]:
             covered += 1
 

@@ -25,11 +25,11 @@ from scipy import stats
 from edacore.contracts import TestResult
 from edacore.effect_sizes import (
     _anova_sums_of_squares,
-    epsilon_squared,
     eta_squared,
     magnitude_label,
     omega_squared,
     omega_squared_from_f,
+    rank_epsilon_squared,
 )
 from edacore.registry import register
 from edacore.stattests._shared import MAX_EXACT_PERMUTATIONS, NanPolicy
@@ -249,7 +249,7 @@ def kruskal_wallis(
     groups = [g[outcome].to_numpy(dtype=float) for _, g in clean.groupby(group, observed=True)]
 
     result = stats.kruskal(*groups)
-    eps = epsilon_squared(clean, outcome, group, ci)
+    eps = rank_epsilon_squared(clean, outcome, group, ci)
 
     return TestResult(
         fact_id=f"kruskal_wallis.{outcome}",
@@ -260,9 +260,9 @@ def kruskal_wallis(
         df=float(len(groups) - 1),
         p_value=float(result.pvalue),
         effect_size=eps["estimate"],
-        effect_size_name="epsilon_squared",
+        effect_size_name="rank_epsilon_squared",
         effect_size_ci=(eps["ci_low"], eps["ci_high"]),
-        effect_magnitude=magnitude_label(eps["estimate"], "epsilon_squared"),
+        effect_magnitude=magnitude_label(eps["estimate"], "rank_epsilon_squared"),
         n=_group_n(clean, group),
         warnings=warnings,
     )

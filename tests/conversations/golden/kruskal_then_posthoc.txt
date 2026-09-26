@@ -98,7 +98,7 @@ EDACOPILOT:
       df          2
       p (raw)     0.0006031
       p (adj)     0.0006031
-      effect      epsilon_squared = 0.1246  95% CI [0.0289, 0.2441] (medium)
+      effect      rank_epsilon_squared = 0.1246  95% CI [0.0289, 0.2441] (medium)
       n used      A=40, B=40, C=40
 
     Next:

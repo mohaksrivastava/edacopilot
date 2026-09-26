@@ -17,7 +17,7 @@ mistaken) assumptions about which functions bootstrap:
 - rank_biserial, cliffs_delta: exact closed form (Fisher-z transform with
   an analytic SE) — effectsize does NOT bootstrap these, despite M2
   assuming it did.
-- kendalls_w, epsilon_squared: BCa bootstrap. effectsize itself uses plain
+- kendalls_w, rank_epsilon_squared: BCa bootstrap. effectsize itself uses plain
   percentile bootstrap for both (not BCa) — this module uses BCa instead
   for a tighter interval, validated by simulated coverage rather than
   fixture matching (test_effect_size_ci_coverage.py), since a bootstrap's
@@ -266,7 +266,7 @@ _MAGNITUDE_THRESHOLDS: dict[str, tuple[float, float, float]] = {
     "eta_squared": (0.01, 0.06, 0.14),
     "partial_eta_squared": (0.01, 0.06, 0.14),
     "omega_squared": (0.01, 0.06, 0.14),
-    "epsilon_squared": (0.01, 0.06, 0.14),
+    "rank_epsilon_squared": (0.01, 0.06, 0.14),
     "kendalls_w": (0.1, 0.3, 0.5),
     "cramers_v": (0.1, 0.3, 0.5),
     "phi": (0.1, 0.3, 0.5),
@@ -364,7 +364,7 @@ def _bca_grouped_bootstrap_ci(
 ) -> tuple[float, float]:
     """BCa CI resampling within each group's array separately (preserving
     group sizes) — matches how R's own bootstrap for this family of
-    statistics resamples (for epsilon_squared). Pure numpy; see
+    statistics resamples (for rank_epsilon_squared). Pure numpy; see
     `_bca_matrix_row_bootstrap_ci` for why."""
     rng = np.random.default_rng(random_state)
     estimates = np.array(
@@ -770,18 +770,29 @@ def omega_squared(df: pd.DataFrame, outcome: str, group: str, ci: float = 0.95) 
 
 
 @register(
-    name="epsilon_squared",
+    name="rank_epsilon_squared",
     kind="effect",
     stage="hypothesis",
     code_template=(
-        "edacore.effect_sizes.epsilon_squared({df}, outcome={outcome!r}, group={group!r}, ci={ci})"
+        "edacore.effect_sizes.rank_epsilon_squared("
+        "{df}, outcome={outcome!r}, group={group!r}, ci={ci})"
     ),
 )
-def epsilon_squared(
+def rank_epsilon_squared(
     df: pd.DataFrame, outcome: str, group: str, ci: float = 0.95
 ) -> dict[str, float]:
     """Rank epsilon-squared, the nonparametric (Kruskal-Wallis-based)
     analogue of eta_squared: H / (N - 1).
+
+    **Named in full on purpose.** "Epsilon-squared" unqualified usually
+    means Kelley's bias-corrected ANOVA measure, which is a different
+    quantity computed from a different test; this is the rank version,
+    and it is what `effectsize::rank_epsilon_squared` computes and what
+    the R fixture checks. A result card that said only "epsilon_squared"
+    would be read by anyone who knows the ANOVA measure as the ANOVA
+    measure -- exactly the class of misreading this project exists to
+    prevent -- so the label carries the distinction rather than relying on
+    the reader knowing that Kruskal-Wallis implies the rank form.
 
     Despite Section 6.8 grouping this with eta2/omega2, effectsize's own
     `rank_epsilon_squared` does NOT use a noncentral-F CI for it — its

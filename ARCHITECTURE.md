@@ -1719,8 +1719,8 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 | M4 | Eligibility engine | Section 7, all families in 7.3 | Table-driven eligibility tests pass; `paired_as_independent` raises ambiguity |
 | M5 | Persona engine (deterministic) | Section 8 minus LLM rationale; template rationales | Worked example 7.4 reproduces exactly; divergence detection correct |
 | M6 | Session | Section 12 | Undo/branch/switch round-trip; ledger adjusts correctly; resume after restart |
-| M7 | Orchestrator in deterministic mode | Section 9 with fallback intents; Python API (`session.ask/accept/override`) | Conversation tests pass with no LLM |
-| M8 | Jupyter UI | Section 13 | Manual checklist in JupyterLab, Notebook 7, VS Code; all actions reachable by buttons |
+| M7 | Orchestrator in deterministic mode | Section 9 with fallback intents; 6.12; Python API (`session.ask/accept/override`) | Conversation tests pass with no LLM |
+| M8 | Jupyter UI | Section 13; 6.11 (`viz.py`) | Manual checklist in JupyterLab, Notebook 7, VS Code; all actions reachable by buttons; every `Card.plots` ref renders |
 | M9 | LLM layer | Section 10–11; LiteLLM; prompts; fact-check; ContextBuilder | Evals in 15.4 meet targets on one API model and one Ollama model; privacy scan 100% |
 | M10 | Missingness | 6.3 incl. Little's test, elicitation flow | Matches `naniar::mcar_test`; `mar_by_group` detected |
 | M11 | Outliers + transforms + quality | 6.2, 6.4, 6.5 | Before/after records correct; no input mutation |
@@ -1730,6 +1730,40 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 | M15 | Docs + example | README, quickstart notebook, CONTRIBUTING | New user can run quickstart end-to-end in < 10 minutes |
 
 **Suggested agent split:** use a stronger model (Sonnet-class) for M3, M4, M5, M9 and M10, where statistical judgment and design matter. A smaller model (Haiku-class) is fine for M0, M1, M6, M8, M11, M13–M15 given this spec, with review.
+
+**Section 6 coverage.** Every subsection of the function catalogue is named
+by exactly one milestone above. The mapping, cross-checked in m7.1:
+
+| Catalogue | Milestone | |
+|---|---|---|
+| 6.1 Profiling | M1 | done |
+| 6.2 Data quality | M11 | |
+| 6.3 Missingness | M10 | |
+| 6.4 Outliers | M11 | |
+| 6.5 Transformations | M11 | |
+| 6.6 Assumption checks | M2 | done |
+| 6.7 Hypothesis tests | M3 | done |
+| 6.8 Effect sizes, multiplicity, power | M2 | done |
+| 6.9 Time series | M12 | |
+| 6.10 Text | M13 | |
+| 6.11 Visualisation | M8 | added in m7.1 |
+| 6.12 Validity notes | M7 | added in m7.1; delivered early, in m6.1 |
+
+Two were missing when the check was run, and both had already cost
+something. **6.12** was in Section 4.2's layout and in no milestone, so all
+nine interpretation guards went unwritten until m6.1 caught it — M7's
+result cards would have shipped without them, which is the one part of a
+result card this product exists to provide. **6.11** was likewise
+unassigned, which is why M7's EXPLORE stage is numeric-only: Section 9.3
+promises it "bivariate plots" and there were no plotting functions to call.
+It is M8's now, alongside the UI that has to draw them, and `Card.plots`
+already carries the refs so nothing in the orchestrator changes when they
+arrive.
+
+A catalogue subsection with no milestone does not announce itself — it
+simply never gets built, and the gap surfaces as a milestone that cannot
+meet its own acceptance criteria. Worth re-running this cross-check
+whenever Section 6 grows.
 
 ---
 
@@ -1770,6 +1804,49 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-26 — M7.1 (tag `m7.1`)
+Three checks against M7, two of which found something.
+
+- **`epsilon_squared` was one name doing one job under a name that means
+  another.** The question was whether it served as both the ANOVA measure
+  and the Kruskal-Wallis rank measure; it does not — the registered
+  function is rank epsilon-squared, H / (N - 1), it is reported only by
+  `kruskal_wallis`, and it is checked against
+  `effectsize::rank_epsilon_squared`. The ambiguity was in the *name*:
+  "epsilon-squared" unqualified usually means Kelley's bias-corrected
+  ANOVA measure, a different quantity from a different test. A result card
+  reading `epsilon_squared = 0.1246` would be read by anyone who knows the
+  ANOVA measure as the ANOVA measure, which is the class of misreading
+  this project exists to prevent, so the function, the reported
+  `effect_size_name` and the magnitude-threshold key are all now
+  `rank_epsilon_squared`. One glossary entry, saying plainly that it is not
+  Kelley's; the bare name is an alias pointing at it, since that is what a
+  user will type. No split was needed because there is only one measure —
+  had there been two, they would have needed two entries and two labels.
+- **The post-hoc pairings were already the specified ones**, and now each
+  has a test. The pairing is statistical, not stylistic: Tukey's
+  studentized range assumes the equal variance that Welch's ANOVA and
+  Alexander-Govern were chosen to avoid assuming, so offering Tukey after
+  either would hand back the assumption the user had just been steered away
+  from — with the correction silently wrong rather than visibly absent.
+  `test_post_hoc_pairings.py` asserts the table against the specification,
+  drives all eight pairings end to end from a significant omnibus through
+  the suggested button to the executed procedure, and checks both
+  directions of the case that matters: Tukey never after Welch or
+  Alexander-Govern, Tukey always after one-way ANOVA.
+- **Two Section 6 subsections belonged to no milestone.** Both were in
+  Section 4.2's repository layout, which is why they read as planned.
+  **6.12** (validity notes) went unwritten until M6.1 caught it; M7's
+  result cards would have shipped without a single interpretation guard.
+  **6.11** (visualisation) is why M7's EXPLORE stage is numeric-only —
+  Section 9.3 promises it "bivariate plots" and there were no plotting
+  functions to call. 6.11 is now M8's, alongside the UI that has to draw
+  them, and 6.12 is recorded against M7. Section 16 carries the full
+  mapping, and `test_spec_coverage.py` parses the specification and fails
+  if a subsection is ever added without one: the failure mode is not a
+  visible gap but a milestone that quietly cannot meet its own acceptance
+  criteria, years of context later.
 
 ### 2026-09-26 — M7 (tag `m7`)
 The orchestrator in deterministic mode (Section 9, with 7.5 and 10.5):
