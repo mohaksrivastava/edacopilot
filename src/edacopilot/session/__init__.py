@@ -29,6 +29,7 @@ from .ledger import (
     TestLedger,
     is_posthoc,
 )
+from .plots import PlotRecord, PlotStore
 from .provenance import (
     ProposalView,
     ProvenanceLog,
@@ -56,6 +57,8 @@ __all__ = [
     "STATE_FILE",
     "DatasetStore",
     "LedgerEntry",
+    "PlotRecord",
+    "PlotStore",
     "ProposalView",
     "ProvenanceLog",
     "ReadOnlyVersionError",

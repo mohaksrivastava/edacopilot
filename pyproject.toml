@@ -41,6 +41,11 @@ all = ["edacopilot[timeseries,text,plotly]"]
 dev = [
   "pytest",
   "hypothesis",
+  # Section 13 targets VS Code notebooks as well as JupyterLab, and VS Code
+  # can only select a virtualenv as a kernel if ipykernel is installed in
+  # it. Not a hard dependency: the library never imports it, and a user's
+  # own Jupyter install already provides one.
+  "ipykernel",
   "ruff",
   "mypy",
   "pandas-stubs",
@@ -78,7 +83,14 @@ disallow_untyped_defs = false
 # scipy/statsmodels/sklearn/scikit-posthocs ship no py.typed marker /
 # stubs (unlike pandas, covered by pandas-stubs above); every call into
 # them is effectively Any. Scoped to just these, not a blanket ignore.
-module = ["scipy.*", "statsmodels.*", "sklearn.*", "scikit_posthocs.*"]
+# ipywidgets ships no py.typed marker either (Section 13's UI layer).
+module = [
+  "scipy.*",
+  "statsmodels.*",
+  "sklearn.*",
+  "scikit_posthocs.*",
+  "ipywidgets.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

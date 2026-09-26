@@ -16,7 +16,7 @@ this stage would produce rather than left as a promise.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
@@ -73,7 +73,26 @@ class ExploreStage(BaseStage):
             title="Explore",
             stage=self.name,
             body_md="\n".join(lines),
+            plots=self._overview_plots(session, profile),
             actions=[suggestion.as_button() for suggestion in self.next_suggestions(session)],
+        )
+
+    def _overview_plots(self, session: Session, profile: Any) -> list[str]:
+        """One plot for the whole frame, when there is one worth drawing.
+
+        A correlation heatmap needs at least two numeric columns; below
+        that there is nothing to relate and the panel would be an empty
+        square with a colourbar.
+        """
+        numeric = [
+            column.name
+            for column in profile.columns
+            if column.semantic_type in (SemanticType.CONTINUOUS, SemanticType.DISCRETE)
+        ]
+        if len(numeric) < 2:
+            return []
+        return _safe_plots(
+            session, [("correlation_heatmap", {"cols": numeric[:MAX_COLUMNS_SHOWN]})]
         )
 
     def describe(self, session: Session, column: str) -> Card:
@@ -98,6 +117,41 @@ class ExploreStage(BaseStage):
             title=f"Summary of {column}",
             stage=self.name,
             body_md="\n".join(lines),
+            plots=_safe_plots(session, _univariate_plots(column, semantic_type)),
+            actions=[suggestion.as_button() for suggestion in self.next_suggestions(session)],
+        )
+
+    def relate(self, session: Session, x: str, y: str) -> Card:
+        """Two variables together — Section 9.3's "bivariate plots".
+
+        Which plot depends on what the pair is, because the same picture
+        does not work for two quantities, a quantity by a group, and two
+        sets of labels. Still read-only: nothing here is a test, and
+        nothing enters the ledger.
+        """
+        df = session.data
+        missing = [name for name in (x, y) if name not in df.columns]
+        if missing:
+            return Card(
+                kind="warning",
+                title=f"No column called {', '.join(repr(n) for n in missing)}",
+                stage=self.name,
+                body_md=f"The columns are: {', '.join(f'`{c}`' for c in df.columns)}.",
+            )
+
+        profile = session.store.profile()
+        types = {column.name: column.semantic_type for column in profile.columns}
+        plots, how = _bivariate_plots(x, y, types)
+        return Card(
+            kind="info",
+            title=f"{x} and {y}",
+            stage=self.name,
+            body_md=(
+                f"{how}\n\nRead-only: this is a look, not a test. A hypothesis chosen "
+                f"because of what you see here carries Section 6.12's "
+                f"`data_driven_comparison` note — the p-value will be optimistic."
+            ),
+            plots=_safe_plots(session, plots),
             actions=[suggestion.as_button() for suggestion in self.next_suggestions(session)],
         )
 
@@ -116,6 +170,73 @@ class ExploreStage(BaseStage):
                 call='session.goto_stage("profile")',
             ),
         ]
+
+
+_NUMERIC = (SemanticType.CONTINUOUS, SemanticType.DISCRETE)
+_CATEGORICAL = (SemanticType.NOMINAL, SemanticType.ORDINAL, SemanticType.BINARY)
+
+
+def _univariate_plots(column: str, semantic_type: SemanticType) -> list[tuple[str, dict[str, Any]]]:
+    """Section 9.3's "univariate summaries", as pictures.
+
+    A histogram and an ECDF for a quantity: the histogram shows shape and
+    the ECDF shows it without a binning choice, and disagreement between
+    them is usually the binning. A bar chart for labels, where neither
+    applies.
+    """
+    if semantic_type in _NUMERIC:
+        return [("histogram", {"col": column}), ("ecdf", {"col": column})]
+    if semantic_type is SemanticType.TEXT:
+        return [("text_length_hist", {"col": column}), ("top_terms_bar", {"col": column})]
+    return [("bar_counts", {"col": column})]
+
+
+def _bivariate_plots(
+    x: str, y: str, types: dict[str, SemanticType]
+) -> tuple[list[tuple[str, dict[str, Any]]], str]:
+    """The right picture for this pair, and a line saying why."""
+    x_type = types.get(x, SemanticType.MIXED)
+    y_type = types.get(y, SemanticType.MIXED)
+
+    if x_type in _NUMERIC and y_type in _NUMERIC:
+        return (
+            [("scatter_lowess", {"x": x, "y": y})],
+            "Both are quantities, so a scatter with a LOWESS curve: the curve shows "
+            "whether a straight line is the right description, which is what Pearson's "
+            "correlation assumes and Spearman's does not.",
+        )
+    if x_type in _CATEGORICAL and y_type in _NUMERIC:
+        return (
+            [("boxplot", {"col": y, "group": x}), ("strip_by_group", {"col": y, "group": x})],
+            f"`{y}` is a quantity and `{x}` is a grouping, so boxes for the spread and a "
+            f"strip plot for the individual points — the strip shows how many "
+            f"observations each box rests on, which the box hides.",
+        )
+    if x_type in _NUMERIC and y_type in _CATEGORICAL:
+        return (
+            [("boxplot", {"col": x, "group": y}), ("strip_by_group", {"col": x, "group": y})],
+            f"`{x}` is a quantity and `{y}` is a grouping, so boxes for the spread and a "
+            f"strip plot for the individual points.",
+        )
+    return (
+        [("mosaic", {"a": x, "b": y})],
+        "Both are labels, so a mosaic: tile area is cell frequency, and an association "
+        "shows as tiles that fail to line up.",
+    )
+
+
+def _safe_plots(session: Session, plots: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    """Render each plot, skipping any that will not draw.
+
+    A degenerate column should cost its own panel, not the whole card.
+    """
+    refs: list[str] = []
+    for function, params in plots:
+        try:
+            refs.append(session.plot(function, **params))
+        except Exception:  # noqa: BLE001 - see docstring
+            continue
+    return refs
 
 
 def _summarize(df: pd.DataFrame, column: str, semantic_type: SemanticType) -> dict[str, object]:

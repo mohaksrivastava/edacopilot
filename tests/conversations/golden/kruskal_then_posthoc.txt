@@ -69,6 +69,10 @@ EDACOPILOT:
       Maverick -> permutation_anova [eligible]
           A permutation ANOVA is worth a look here; it assumes less than the standard choice; though independence depends on how the data was collected, not just its values.
 
+    Plots:
+      - p0
+      - p1
+
     Next:
       [Professor + Consultant: kruskal_wallis]   (session.accept("professor"))
       [Maverick: permutation_anova]   (session.accept("maverick"))

@@ -122,6 +122,10 @@ EDACOPILOT:
       Maverick -> yuen_trimmed_t [eligible]
           Yuen's trimmed-mean t-test is worth a look here; it assumes less than the standard choice; though independence depends on how the data was collected, not just its values.
 
+    Plots:
+      - p0
+      - p1
+
     Next:
       [Professor + Consultant: mann_whitney]   (session.accept("professor"))
       [Maverick: yuen_trimmed_t]   (session.accept("maverick"))

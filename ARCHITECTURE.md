@@ -778,6 +778,40 @@ All return a `matplotlib.figure.Figure` and a `plot_ref` ID stored in the sessio
 
 `histogram`, `kde`, `ecdf`, `boxplot`, `violin`, `strip_by_group`, `qq_plot`, `scatter_lowess`, `pair_plot(cols, max_cols=6)`, `correlation_heatmap`, `bar_counts`, `mosaic`, `missing_matrix`, `missing_heatmap`, `missing_by_group`, `outlier_plot`, `before_after(col, record)`, `ts_line(col, time, entity=None)`, `stl_plot`, `acf_plot`, `pacf_plot`, `change_point_plot`, `text_length_hist`, `top_terms_bar`, `effect_size_forest(results)`.
 
+All 25 implemented in M8. Four points settled there:
+
+- **They return a `Figure`; the session mints the `plot_ref`.** The two
+  halves of the sentence above sit on opposite sides of the `edacore`
+  boundary and have to: `edacore` draws, because that is a pure function
+  of the data, and `session.plot(...)` writes the PNG under
+  `.edacopilot/<session_id>/plots/` and returns the id, because only the
+  session knows where that is. A user calling `edacore.viz` directly gets
+  a figure and does what they like with it.
+- **No pyplot.** Each builds a bare `matplotlib.figure.Figure`. `pyplot`
+  keeps a global registry of every figure it creates and releases none, so
+  a library going through it would leak one per call into the host kernel
+  and start warning at twenty. A test asserts the registry stays empty
+  across all 25.
+- **A `plot_ref` is keyed on function, params *and dataset version*.**
+  Re-rendering the same diagnostic reuses the PNG; the same plot of a
+  transformed frame is a different plot, because it is a claim about a
+  different state of the data.
+- **Three signatures take what a later milestone will detect**, so the
+  plot exists now and the detector plugs in without a signature change:
+  `outlier_plot(df, col, flagged=None)` (M11's detectors pass indices;
+  defaults to the Tukey fence), `change_point_plot(df, col, change_points,
+  time=None)` (M12 passes the points), and `before_after(before, after,
+  col, record=None)` — 6.11 writes it as `(col, record)`, but a
+  `TransformRecord` carries summaries rather than data, so both frames
+  have to be passed.
+
+Rule 7 is enforced for plots the same way it is for statistics, by
+`tests/helpers/plot_check.py`: the rendered code is executed and the
+*plotted data* compared — the artists' own vertices, bar rectangles,
+scatter offsets and image arrays — rather than pixels. An image comparison
+would fail on a matplotlib point release or a font substitution without
+anything being wrong, and nobody can diagnose a pixel diff.
+
 ### 6.12 Validity notes (`validity_notes.py`)
 Deterministic interpretation guards attached to every `TestResult`. Each is a function `(result, context) -> str | None`:
 | Guard | Fires when | Note (template) |
@@ -1607,6 +1641,47 @@ A pure-Python API mirrors every action (`session.ask(...)`, `session.accept("pro
 - Colour-coding: PASS green, BORDERLINE amber, FAIL red, UNTESTABLE grey. Also use icons/text so it's not colour-only.
 - Everything must work in VS Code notebooks (test there; avoid JupyterLab-only APIs).
 
+Implemented in `edacopilot/ui/` (M8). Four things worth stating:
+
+- **The panel owns no logic.** Every button hands the `Intent` its card
+  already carried to `Orchestrator.handle` — the same method the Python
+  API calls. There is no path in the UI that reads eligibility, picks a
+  persona or decides anything, which is what makes Section 13.1's claim
+  true rather than aspirational. It is tested as an equality: two
+  sessions, one driven through the API and one by invoking the buttons'
+  own click handlers, must end byte-identical.
+- **Colour is never the only signal.** `STATUS_MARKS` pairs every
+  `CheckStatus` with an icon and a word as well as a colour, in one place
+  so no renderer can drift from it. This is not a box-tick: these cards
+  exist to tell someone whether an assumption failed, and a red/green
+  distinction is invisible to roughly one man in twelve.
+- **Portability is a constraint on what is used, not a thing to test for
+  afterwards.** Core ipywidgets only; plots go in as PNG bytes in an
+  `Image` rather than through a matplotlib display hook, because that is
+  the one approach that behaves identically in Lab, Notebook 7 and VS
+  Code. A test parses the UI modules' imports and fails on `ipylab`,
+  `jupyterlab*`, `jupyter_server` or `notebook`; another asserts the panel
+  emits `application/vnd.jupyter.widget-view+json`, in-process and
+  (nightly) through a real `ipykernel` subprocess.
+- **The override flow is the one place the UI adds a step.** The API takes
+  the reason as an argument; a panel has to collect it. So an
+  `override_confirm` card grows a text box with Accept disabled until it
+  is non-empty, and an INELIGIBLE override grows a second confirmation
+  checkbox that is also required. Both gates stay enforced in the
+  orchestrator — the widget only makes them reachable with a mouse, and
+  disabling the button is so the user is not invited to press something
+  that will be refused.
+
+Glossary terms in card text are wrapped in `<abbr title=...>` carrying
+their one-line definition, so an explanation arrives where the consequence
+does. `<abbr>` rather than a JavaScript popover because it is the one
+mechanism that behaves the same in all three hosts and stays reachable by
+keyboard.
+
+`docs/ui_manual_checklist.md` is M8's acceptance criterion: the things
+only a human in a real front end can judge, with the much longer list of
+what is already automated.
+
 ### 13.3 Future (v2)
 A JupyterLab sidebar extension (TypeScript) that talks to the same Python session, and "insert code cell" into the current notebook. Out of scope for v1 because it needs a frontend build.
 
@@ -1804,6 +1879,99 @@ whenever Section 6 grows.
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-26 — M8 (tag `m8`)
+The Jupyter UI (Section 13) and the visualisation catalogue (Section 6.11),
+which m7.1's audit had just moved into this milestone. Still no LLM call
+anywhere.
+
+Deliverable for review: `docs/ui_manual_checklist.md` — the things only a
+human in a real front end can judge, and the longer list of what no longer
+needs checking by hand.
+
+**Part A — `edacore/viz.py`.** All 25 functions Section 6.11 lists.
+
+- **They return a `Figure`; the session mints the `plot_ref`.** Section
+  6.11's sentence spans the `edacore` boundary and had to be split:
+  `edacore` draws, `session.plot(...)` writes the PNG and returns the id.
+  Giving `edacore` a session would have broken Section 3.1's promise that
+  it stands alone as a statistics library.
+- **No pyplot.** Each builds a bare `Figure`, because `pyplot` never
+  releases a figure and a library going through it leaks one per call into
+  the host kernel. A test asserts the global registry stays empty across
+  all 25 — the kind of thing that is invisible until a long notebook
+  starts warning.
+- **Rule 7 for plots**, by executing the rendered code and comparing the
+  artists' own arrays rather than pixels. A pixel comparison would fail on
+  a matplotlib point release or a font substitution, and a pixel diff is
+  not something anyone can act on.
+- **A `plot_ref` is keyed on the dataset version as well as the function
+  and its parameters.** The same diagnostic rendered twice reuses one PNG;
+  the same plot of a transformed frame is a different plot, because it is
+  a claim about a different state of the data.
+- **Plots are wired into cards.** A FAILing or BORDERLINE check gets the
+  picture that shows what failed — a Q-Q plot for normality, boxes for
+  variance, a violin for shape — and the five normality checks on one
+  question collapse onto one Q-Q plot rather than five. Passing checks get
+  none: Section 1.3's "hide noise" applies to evidence as much as to
+  personas, and a card the user learns to scroll past is worse than a
+  shorter one. EXPLORE gained the univariate and bivariate plots Section
+  9.3 had been promising since M7, where it shipped numeric-only precisely
+  because 6.11 did not exist.
+
+**Part B — `edacopilot/ui/`.**
+
+- **The panel owns no logic**, and that is tested as an equality rather
+  than asserted: two sessions, one driven through the Python API and one
+  by invoking the buttons' own click handlers, end byte-identical —
+  including a whole transcript and the full override flow. Because of
+  that, M7's conversation tests cover the UI too, and the only bugs M8 can
+  introduce are rendering bugs.
+- **Every card kind renders, twice over**: once from a synthetic card per
+  kind, and once from every card the six golden transcripts actually
+  produce. The second matters because a hand-made example fills fields the
+  real thing sometimes leaves empty — a result with no CI, a divergence
+  whose proposal has no function — and those are what break a renderer.
+- **Status is never colour alone.** `STATUS_MARKS` pairs each
+  `CheckStatus` with an icon and a word, in one place, with tests that the
+  icons and words are distinct as well as present.
+- **Portability was designed in rather than checked afterwards**: core
+  ipywidgets only, PNG bytes in an `Image` instead of a matplotlib display
+  hook. One test parses the UI modules' imports and fails on `ipylab`,
+  `jupyterlab*`, `jupyter_server` or `notebook`; another asserts the panel
+  emits `application/vnd.jupyter.widget-view+json`, which is what all
+  three hosts render — in-process, and nightly through a real `ipykernel`
+  subprocess, which is the only test here that exercises the kernel path
+  at all.
+- **Glossary terms in card text carry their definition** in an
+  `<abbr title=...>`, so the explanation arrives where the consequence
+  does. Terms inside code spans are left alone, and words shorter than
+  four characters are skipped — underlining every "the" would make a card
+  unreadable and teach nothing.
+- **The override flow is the one place the UI adds a step**, because the
+  API takes the reason as an argument and a panel has to collect it.
+  Accept is disabled until the reason is non-empty, and for an INELIGIBLE
+  method until the second confirmation is ticked too. The orchestrator
+  still enforces both; disabling the button is so the user is not invited
+  to press something that will be refused.
+- **`%eda` magics and `eda.start(df, ...)`** per Section 13.1, each a
+  single `session.*` call. Argument parsing is `shlex` plus a small table
+  rather than `argparse`, which exits the process on a bad argument — in a
+  notebook that means killing the kernel.
+
+Three smaller things:
+
+- **`ipykernel` is now a `[dev]` dependency**, not a hard one. VS Code can
+  only select a virtualenv as a kernel if it is installed there, but the
+  library never imports it and a user's own Jupyter install provides one.
+- **A root `conftest.py` sets the Agg backend** before anything imports
+  pyplot, and closes figures after every test. Backend selection would
+  otherwise depend on what is installed on the machine — an interactive
+  backend locally and Agg in CI, which is the shape of difference that
+  makes a suite pass in one place and fail in the other.
+- **`Text.on_submit` and `Layout(overflow_y=...)` are both gone in
+  ipywidgets 8.** Running the panel under `-W error::DeprecationWarning`
+  found them; a test now pins that no deprecated widget API is used.
 
 ### 2026-09-26 — M7.1 (tag `m7.1`)
 Three checks against M7, two of which found something, plus a round of

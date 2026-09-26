@@ -62,6 +62,7 @@ from edacore.contracts import (
 from edacore.registry import registry
 
 from .cards import ActionButton, Card, ProposalView, Suggestion
+from .diagnostic_plots import illustrate
 from .intents import Intent, IntentType, button
 from .state_machine import Stage, jump_warning, next_stage, parse_stage
 
@@ -1142,19 +1143,25 @@ class Orchestrator:
     def _show(self, intent: Intent) -> Card:
         """Ad-hoc read-only request (Section 9.1's SHOW).
 
-        Section 6.11's plotting functions are not in this build, so this
-        gives the numeric summary instead of a plot rather than pretending.
+        "plot age against income" names two columns and wants them
+        related; "plot income" names one and wants it described. Which
+        columns were named is read off the text against the frame's own
+        column list, since with no LLM there is nothing else to read it
+        with (Section 10.5).
         """
         from edacopilot.stages.explore import ExploreStage
 
         self._enter(Stage.EXPLORE)
         explore = self.module(Stage.EXPLORE)
         assert isinstance(explore, ExploreStage)
+
         text = str(intent.payload.get("text", ""))
-        column = next((c for c in self.session.data.columns if c in text), None)
-        if column is None:
-            return explore.entry_summary(self.session)
-        return explore.describe(self.session, column)
+        named = [str(column) for column in self.session.data.columns if str(column) in text]
+        if len(named) >= 2:
+            return explore.relate(self.session, named[0], named[1])
+        if len(named) == 1:
+            return explore.describe(self.session, named[0])
+        return explore.entry_summary(self.session)
 
     def _settings(self, intent: Intent) -> Card:
         if intent.payload.get("show") == "ledger":
@@ -1276,6 +1283,16 @@ class Orchestrator:
             )
         )
 
+        # Section 13.2: plots render inline in cards. A Shapiro p-value
+        # says normality failed; the Q-Q plot says how, and a long tail
+        # and two outliers lead to different methods.
+        diagnostics, plots = illustrate(
+            list(pending.candidates.checks),
+            pending.spec,
+            self._render_plot,
+            plot_all=bool(self.session.config.get("plot_all_diagnostics")),
+        )
+
         return Card(
             kind="consensus" if consensus else "divergence",
             title=(
@@ -1285,11 +1302,16 @@ class Orchestrator:
             ),
             stage=self.state.stage.value,
             body_md="\n".join(lines),
-            diagnostics=list(pending.candidates.checks),
+            diagnostics=diagnostics,
             graded=list(pending.candidates.graded),
             proposals=_proposal_views(pending, statuses),
+            plots=plots,
             actions=actions,
         )
+
+    def _render_plot(self, function: str, params: dict[str, Any]) -> str:
+        """Draw and store one plot, returning its `plot_ref`."""
+        return self.session.plot(function, **params)
 
 
 # --------------------------------------------------------------------------

@@ -6,25 +6,40 @@ showing results and comparing trade-offs across three personas (Professor,
 Consultant, Maverick) before the user decides.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full specification and build
-plan. The project is currently at milestone M7 (the orchestrator, driven from
-Python); the Jupyter panel lands in M8 and a quickstart notebook in M15.
+plan. The project is currently at milestone M8 (the Jupyter panel); a
+quickstart notebook lands in M15.
 
-[docs/sample_conversation.md](docs/sample_conversation.md) shows a whole
-session as the user sees it. Everything runs with **no LLM configured** —
-that is the supported mode today, and it is how the test suite runs.
+Everything runs with **no LLM configured** — that is the supported mode
+today, and it is how the test suite runs.
+
+## In a notebook
 
 ```python
 import pandas as pd
-from edacopilot.session import Session
+import edacopilot as eda
 
-session = Session.start(pd.read_csv("survey.csv"))
-session.goto_stage("profile")
+session = eda.start(pd.read_csv("survey.csv"), target="churn", name="survey")
+```
+
+The panel renders inline: stage tabs, cards with their diagnostics and
+plots, and a button for each persona's proposal. It works in JupyterLab,
+Notebook 7 and VS Code notebooks. There are `%eda` magics too — see
+ARCHITECTURE.md Section 13.1.
+
+## Or as plain Python
+
+Every action the panel offers is a method on the session — which is what
+makes the tool scriptable, and what the panel itself calls:
+
+```python
 session.ask(goal="compare_groups", outcome="income", group="region", design="independent")
 # ... read the card, then:
 session.accept("professor")
 ```
 
-Nothing runs until you accept it.
+**Nothing runs until you accept it.**
+[docs/sample_conversation.md](docs/sample_conversation.md) shows a whole
+session as the user sees it.
 
 ## ⚠️ `.edacopilot/` contains your data — gitignore it
 

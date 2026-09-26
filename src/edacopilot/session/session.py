@@ -40,11 +40,12 @@ from edacore.registry import registry
 
 from .dataset_store import DatasetStore, VersionRecord
 from .ledger import AdjustMethod, LedgerEntry, TestLedger, is_posthoc
+from .plots import PlotStore
 from .provenance import ProposalView, ProvenanceLog, Step
 
 SESSION_DIR = ".edacopilot"
 STATE_FILE = "session.json"
-STATE_VERSION = 2
+STATE_VERSION = 3
 
 GITIGNORE_WARNING = (
     f"{SESSION_DIR}/ stores your dataset as parquet alongside the session history. "
@@ -67,6 +68,7 @@ class Session:
     config: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _caches: dict[str, CheckCache] = field(default_factory=dict, repr=False)
+    plot_store: PlotStore | None = None
     _turn_state: TurnState = field(default_factory=TurnState, repr=False)
     _orchestrator: Orchestrator | None = field(default=None, repr=False)
 
@@ -98,6 +100,41 @@ class Session:
     @property
     def directory(self) -> Path:
         return self.store.directory
+
+    @property
+    def plots(self) -> PlotStore:
+        """Where this session's rendered plots live (Section 6.11).
+
+        Created lazily rather than in `__post_init__` so a resumed session
+        can hand in the records it read from disk.
+        """
+        if self.plot_store is None:
+            self.plot_store = PlotStore(directory=self.directory)
+        return self.plot_store
+
+    def plot(self, function: str, /, **params: Any) -> str:
+        """Render a registered plot and return its `plot_ref`.
+
+        The two halves of Section 6.11 meet here: `edacore.viz` draws a
+        `Figure` from the data, and the session writes the PNG and mints
+        the id. Keyed on the dataset version, so a plot of `v1` is never
+        served for a question about `v2`.
+        """
+        spec = registry.get(function)
+        if spec.kind != "viz":
+            raise ValueError(f"'{function}' is not a plot function (kind={spec.kind!r})")
+        figure = spec.func(self.data, **params) if spec.takes_df else spec.func(**params)
+        before = len(self.plots)
+        plot_ref = self.plots.save(
+            figure, function=function, params=params, version_id=self.store.head
+        )
+        if len(self.plots) != before:
+            # Persisted immediately: the PNG is already on disk, and a
+            # session.json that did not know about it would leave an
+            # orphan file and a card referring to a ref that resume()
+            # cannot resolve.
+            self.save()
+        return plot_ref
 
     @property
     def state_path(self) -> Path:
@@ -362,6 +399,7 @@ class Session:
             # resumed session re-asks rather than accepting into a context
             # the user no longer has in front of them.
             "orchestrator": self._turn_state.to_state(),
+            "plots": self.plots.to_state(),
         }
 
     def save(self) -> Path:
@@ -414,6 +452,7 @@ class Session:
             config=state.get("config", {}),
             created_at=datetime.fromisoformat(state["created_at"]),
             _turn_state=TurnState.from_state(state.get("orchestrator", {})),
+            plot_store=PlotStore.from_state(directory, state.get("plots", [])),
         )
 
 
