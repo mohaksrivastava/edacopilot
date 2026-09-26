@@ -57,6 +57,19 @@ class CandidateSet(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
     unavailable: dict[str, str] = Field(default_factory=dict)
     dataset_version: str = ""
+    # The fact_ids in `checks` that actually *graded* an assumption for some
+    # candidate. The rest are evidence (`Resolution.evidence`): real facts,
+    # recorded and available, but not verdicts. A `measurement_level` check
+    # against a scale no method required legitimately reads FAIL while the
+    # assumption it belongs to passed, so a card that rendered every check
+    # as a verdict would show failures that decided nothing -- and a reader
+    # who learns the diagnostics are padded stops reading them.
+    graded: list[str] = Field(default_factory=list)
+
+    def graded_checks(self) -> list[AssumptionCheck]:
+        """The checks that decided something. What a card should show."""
+        decisive = set(self.graded)
+        return [check for check in self.checks if check.fact_id in decisive]
 
     def by_status(self, status: Eligibility) -> list[Candidate]:
         return [c for c in self.candidates if c.eligibility is status]
@@ -81,6 +94,7 @@ class _Evaluation:
     reasons: list[str]
     checks: list[AssumptionCheck]
     n_caveats: int
+    graded: list[str]
 
 
 def _evaluate(function: str, ctx: ResolutionContext) -> _Evaluation:
@@ -92,9 +106,12 @@ def _evaluate(function: str, ctx: ResolutionContext) -> _Evaluation:
     caveats: list[str] = []
     untestable: list[str] = []
 
+    graded_ids: list[str] = []
+
     for assumption in spec.assumptions.hard:
         found = resolve(assumption, ctx)
         hard_checks.extend(found.all_checks)
+        graded_ids.extend(check.fact_id for check in found.graded)
         for check in found.graded:
             if check.status is CheckStatus.FAIL:
                 blocking.append(check.fact_id)
@@ -104,6 +121,7 @@ def _evaluate(function: str, ctx: ResolutionContext) -> _Evaluation:
     for assumption in spec.assumptions.soft:
         found = resolve(assumption, ctx)
         soft_checks.extend(found.all_checks)
+        graded_ids.extend(check.fact_id for check in found.graded)
         for check in found.graded:
             if check.status in _CAVEAT_STATUSES:
                 caveats.append(check.fact_id)
@@ -128,7 +146,9 @@ def _evaluate(function: str, ctx: ResolutionContext) -> _Evaluation:
     # (a Shapiro result answers both `normality` and `normality_or_large_n`),
     # and listing the same fact twice reads like two separate problems.
     reasons = list(dict.fromkeys([*reasons, *untestable]))
-    return _Evaluation(eligibility, reasons, [*hard_checks, *soft_checks], len(set(caveats)))
+    return _Evaluation(
+        eligibility, reasons, [*hard_checks, *soft_checks], len(set(caveats)), graded_ids
+    )
 
 
 # Assumptions whose caveats a persona's CLT shortcut may speak to.
@@ -208,6 +228,7 @@ def select_candidates(
     candidates: list[Candidate] = []
     sort_keys: list[tuple[int, int, int, int, str]] = []
     all_checks: dict[str, AssumptionCheck] = {}
+    graded: dict[str, None] = {}
     unavailable: dict[str, str] = {}
 
     for method in family.methods:
@@ -220,6 +241,8 @@ def select_candidates(
         evaluation = _evaluate(method.function, ctx)
         for check in evaluation.checks:
             all_checks.setdefault(check.fact_id, check)
+        for fact_id in evaluation.graded:
+            graded.setdefault(fact_id, None)
 
         function_spec = registry.get(method.function)
         candidate = Candidate(
@@ -242,6 +265,7 @@ def select_candidates(
     if _needs_large_sample_fact(family, all_checks):
         for check in resolve("normality_or_large_n", ctx).graded:
             all_checks.setdefault(check.fact_id, check)
+            graded.setdefault(check.fact_id, None)
 
     ranked = [c for _, c in sorted(zip(sort_keys, candidates, strict=True), key=lambda p: p[0])]
 
@@ -249,6 +273,7 @@ def select_candidates(
         spec=spec,
         family=family.name,
         checks=sorted(all_checks.values(), key=lambda c: c.fact_id),
+        graded=sorted(graded),
         candidates=ranked,
         unavailable=unavailable,
         dataset_version=cache.dataset_version,

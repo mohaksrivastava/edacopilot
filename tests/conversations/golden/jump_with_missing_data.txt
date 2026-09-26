@@ -1,0 +1,164 @@
+# Jumping to HYPOTHESIS with untreated missing data
+
+Section 9.2: the stage order is a suggestion, not a rule. Jumping past an unvisited stage is allowed and produces one line saying what it costs — with a number from this dataset, not a general caution. The test then reports the n it actually used, which is smaller than the row count.
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.goto_stage("profile")
+
+EDACOPILOT:
+    [info] Dataset profile
+    stage: profile
+
+    120 rows x 2 columns, read as **cross sectional**.
+
+    | Column | Type | Confidence | Missing | Unique |
+    |---|---|---|---|---|
+    | `income` | continuous | 90% | 18 (15%) | 102 |
+    | `region` | binary | 100% | — | 2 |
+
+    - **18 exact duplicate rows.** They count twice in every test, which makes results look more certain than they are.
+
+    Next:
+      [Review missing values]   (session.goto_stage("missingness"))
+      [Look at the variables]   (session.goto_stage("explore"))
+      [Ask a question of the data]   (session.ask(goal="compare_groups", outcome=..., group=...))
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.goto_stage("hypothesis")
+
+    (Quality, missingness, outliers and transform were never visited.)
+
+EDACOPILOT:
+    [warning] Hypothesis testing
+    stage: hypothesis
+
+    ⚠ Missing values haven't been reviewed; 15% of `income` is missing and tests will drop those rows. (Skipped: quality, missingness, outliers, transform.)
+
+    Ask a question and this stage will check the assumptions, rank every valid method, and show what each persona would choose. Nothing runs until you accept.
+
+    What you can ask about:
+    - outcomes: `income`
+    - groupings: `region`
+
+    Next:
+      [Ask another question]   (session.ask(goal=..., outcome=..., group=...))
+      [Show the test ledger]   (session.ledger())
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.ask(goal="compare_groups", outcome="income", group="region",
+                design="independent", confirmed_by_user=["design"])
+
+EDACOPILOT:
+    [divergence] The personas disagree (2 proposals)
+    stage: hypothesis
+
+    Professor + Consultant → Mann-Whitney. Maverick → Yuen's trimmed-mean t-test.
+
+    Family: `two_independent_numeric`. 8 method(s) considered, 6 eligible.
+
+    | Method | Status | Estimates |
+    |---|---|---|
+    | `yuen_trimmed_t` | eligible | difference in trimmed means (robust to outliers) |
+    | `bootstrap_diff` | eligible | difference in a summary statistic, with a bootstrap CI (no p-value) |
+    | `permutation_test_2s` | eligible | difference in means (independent groups, permutation-based p-value) |
+    | `mann_whitney` | eligible | stochastic dominance between two independent groups |
+    | `brunner_munzel` | eligible | relative effect P(X < Y) + 0.5*P(X == Y) between two independent groups |
+    | `ks_two_sample` | eligible | whether two independent samples come from the same distribution |
+    | `student_t` | caveat | difference in means (independent groups, equal variance) |
+    | `welch_t` | caveat | difference in means (independent groups, unequal variance) |
+
+    Nothing has run. Accept a proposal, or override with a method of your own.
+
+    Diagnostics (these decided which methods are valid):
+      UNTESTABLE  exchangeability.untestable
+                  -> a permutation test assumes the group labels are exchangeable under the null; that follows from how the data was collected, not from its values
+      UNTESTABLE  independence.design
+                  -> Independence depends on how the data was collected, not just its values; confirm the design with whoever collected it.
+      PASS        independent.design=independent.required=independent
+                  -> An independent-samples test treats every row as a separate subject; if the same subject appears more than once, it counts one person's repeated readings as independent evidence and reports more certainty than the data supports.
+      PASS        measurement_level.income.continuous statistic=0.9
+                  -> 'income' is continuous, which a method built for continuous data can use.
+      FAIL        normality_or_large_n.group=south.variable=income statistic=48
+                  -> This sample is skewed enough, for its size, that the mean's sampling distribution is not yet symmetric -- so a test built on it can be off-centre, not merely imprecise.
+      PASS        same_shape.income.region statistic=0.1204 p=0.8046
+                  -> Different distribution shapes mean a Mann-Whitney result reflects general stochastic dominance, not specifically a difference in medians.
+      PASS        sample_size.income.region statistic=48
+                  -> Too few observations in a group makes the test's asymptotic assumptions unreliable and its result unstable.
+      PASS        variance.levene.income.region statistic=0.01233 p=0.9118
+                  -> Unequal variances bias standard-error estimates in tests that assume equal spread; prefer a Welch-type correction.
+
+    Also computed (evidence, not a verdict on any method):
+      FAIL        measurement_level.income.binary statistic=0.9
+                  -> 'income' looks like continuous, not binary; a method built for binary data may not mean what it claims here.
+      PASS        measurement_level.income.discrete statistic=0.9
+                  -> 'income' is continuous, which a method built for discrete data can use.
+      FAIL        measurement_level.income.ordinal statistic=0.9
+                  -> 'income' looks like continuous, not ordinal; a method built for ordinal data may not mean what it claims here.
+      BORDERLINE  normality.descriptive.income.region=north statistic=1.714
+                  -> Skew or heavy tails distort the mean and standard-deviation-based methods; check alongside a formal normality test.
+      BORDERLINE  normality.descriptive.income.region=south statistic=1.825
+                  -> Skew or heavy tails distort the mean and standard-deviation-based methods; check alongside a formal normality test.
+      FAIL        normality.shapiro.income.region=north statistic=0.853 p=9.642e-06
+                  -> If normality fails, parametric tests that assume it may mislead; prefer a robust or nonparametric alternative.
+      FAIL        normality.shapiro.income.region=south statistic=0.817 p=3.215e-06
+                  -> If normality fails, parametric tests that assume it may mislead; prefer a robust or nonparametric alternative.
+
+    Proposals:
+      Professor -> mann_whitney [eligible]
+          Mann-Whitney is the method whose assumptions this data actually meets; every assumption it makes is checked and holds here; though independence depends on how the data was collected, not just its values.
+      Consultant -> mann_whitney [eligible]
+          Use Mann-Whitney.
+      Maverick -> yuen_trimmed_t [eligible]
+          Yuen's trimmed-mean t-test is worth a look here; it assumes less than the standard choice; though independence depends on how the data was collected, not just its values.
+
+    Next:
+      [Professor + Consultant: mann_whitney]   (session.accept("professor"))
+      [Maverick: yuen_trimmed_t]   (session.accept("maverick"))
+      [Use something else (e.g. bootstrap_diff)]   (session.override("bootstrap_diff"))
+      [Why this method?]   (session.explain("mann_whitney"))
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.accept()
+
+EDACOPILOT:
+    [warning] The personas disagree — which one?
+    stage: hypothesis
+
+    Professor + Consultant → Mann-Whitney. Maverick → Yuen's trimmed-mean t-test.
+
+    Name the persona whose proposal to run: `session.accept("professor")` for Professor + Consultant (mann_whitney) or `session.accept("maverick")` for Maverick (yuen_trimmed_t).
+
+    Proposals:
+      Professor -> mann_whitney [eligible]
+          Mann-Whitney is the method whose assumptions this data actually meets; every assumption it makes is checked and holds here; though independence depends on how the data was collected, not just its values.
+      Consultant -> mann_whitney [eligible]
+          Use Mann-Whitney.
+      Maverick -> yuen_trimmed_t [eligible]
+          Yuen's trimmed-mean t-test is worth a look here; it assumes less than the standard choice; though independence depends on how the data was collected, not just its values.
+
+    Next:
+      [Professor + Consultant: mann_whitney]   (session.accept("professor"))
+      [Maverick: yuen_trimmed_t]   (session.accept("maverick"))
+
+--------------------------------------------------------------------------
+
+SESSION AFTERWARDS
+
+  branch: main   version: v0
+  branches: main
+  versions: v0
+  tests counted toward the session adjustment: 0
+
+  provenance:
+    (no steps — nothing was accepted)
+
+  code (rule 7 — every accepted step, runnable):
+    (nothing was accepted)

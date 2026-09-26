@@ -649,9 +649,17 @@ def check_measurement_level(df: pd.DataFrame, col: str, required: SemanticType) 
         p_value=None,
         threshold=f"inferred semantic type must be compatible with '{required}'",
         status=CheckStatus.PASS if compatible else CheckStatus.FAIL,
+        # Phrased for the status it actually has. The single unconditional
+        # wording read "'income' looks like continuous, not continuous" on
+        # every PASS, which is the kind of line that teaches a reader to
+        # stop reading diagnostics.
         consequence=(
-            f"'{col}' looks like {inferred.value}, not {required.value}; a method built "
-            f"for {required.value} data may not mean what it claims here."
+            f"'{col}' is {inferred.value}, which a method built for {required.value} data can use."
+            if compatible
+            else (
+                f"'{col}' looks like {inferred.value}, not {required.value}; a method "
+                f"built for {required.value} data may not mean what it claims here."
+            )
         ),
     )
 

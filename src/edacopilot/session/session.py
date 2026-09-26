@@ -32,8 +32,10 @@ from uuid import uuid4
 import pandas as pd
 
 from edacopilot.eligibility import CandidateSet, CheckCache, QuestionSpec, select_candidates
+from edacopilot.orchestrator.cards import Card
+from edacopilot.orchestrator.loop import Orchestrator, TurnState
 from edacopilot.personas import PersonaVerdict, propose_with_rationales
-from edacore.contracts import Candidate, PostHocResult, TestResult
+from edacore.contracts import Candidate, Eligibility, PostHocResult, TestResult
 from edacore.registry import registry
 
 from .dataset_store import DatasetStore, VersionRecord
@@ -42,7 +44,7 @@ from .provenance import ProposalView, ProvenanceLog, Step
 
 SESSION_DIR = ".edacopilot"
 STATE_FILE = "session.json"
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 GITIGNORE_WARNING = (
     f"{SESSION_DIR}/ stores your dataset as parquet alongside the session history. "
@@ -65,6 +67,8 @@ class Session:
     config: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _caches: dict[str, CheckCache] = field(default_factory=dict, repr=False)
+    _turn_state: TurnState = field(default_factory=TurnState, repr=False)
+    _orchestrator: Orchestrator | None = field(default=None, repr=False)
 
     # ---- lifecycle ------------------------------------------------------
 
@@ -111,7 +115,7 @@ class Session:
         return self.store.head
 
     @property
-    def branch(self) -> str:
+    def active_branch(self) -> str:
         return self.store.active_branch
 
     def original(self) -> pd.DataFrame:
@@ -149,7 +153,7 @@ class Session:
 
     # ---- accepting a step ----------------------------------------------
 
-    def accept(
+    def record_step(
         self,
         *,
         stage: str,
@@ -163,6 +167,8 @@ class Session:
         result: TestResult | PostHocResult | None = None,
         family: str | None = None,
         label: str = "",
+        code_preamble: str = "",
+        df_var: str = "df",
     ) -> Step:
         """Record an accepted step, and any new dataset version or test
         result that came with it (Section 12.2).
@@ -171,10 +177,16 @@ class Session:
         the log's reproducibility claim cannot drift from what the function
         actually is (rule 7).
         """
-        if chosen_via == "override" and not (override_reason or "").strip():
+        if (
+            chosen_via == "override"
+            and chosen is not None
+            and chosen.eligibility is not Eligibility.ELIGIBLE
+            and not (override_reason or "").strip()
+        ):
             raise ValueError(
-                "an override needs a typed reason (Section 7.5); it is stored in the "
-                "provenance log and emitted as a code comment on export"
+                f"overriding to '{chosen.function}' needs a typed reason: it is "
+                f"{chosen.eligibility.value}, not eligible (Section 7.5). The reason is "
+                f"stored in the provenance log and emitted as a code comment on export"
             )
 
         step_id = self.provenance.next_step_id()
@@ -201,7 +213,7 @@ class Session:
             input_version=input_version,
             output_version=output_version,
             result_fact_id=entry.fact_id if entry else None,
-            code=_render_code(chosen),
+            code=_render_code(chosen, override_reason, code_preamble, df_var),
         )
         self.provenance.append(step)
         self.save()
@@ -226,19 +238,86 @@ class Session:
             result, family=family_label, branch=self.store.active_branch, step_id=step_id
         )
 
-    # ---- version navigation --------------------------------------------
+    # ---- the conversational API (Section 9) ------------------------------
+    #
+    # Every method here returns a `Card`: what the user would see. That is
+    # the whole surface M8's panel will drive, so a golden transcript in
+    # `tests/conversations/` exercises the same loop a button click will,
+    # and the UI can only introduce UI bugs.
+    #
+    # Rule 3 is the property to preserve when adding to this list: only
+    # `accept` and `override` may reach `record_step`. Everything else
+    # looks, asks or navigates.
 
-    def undo(self) -> VersionRecord:
-        record = self.store.undo()
-        self.save()
-        return record
+    @property
+    def orchestrator(self) -> Orchestrator:
+        """The turn loop for this session, created on first use."""
+        if self._orchestrator is None:
+            self._orchestrator = Orchestrator(self, self._turn_state)
+        return self._orchestrator
+
+    @property
+    def stage(self) -> str:
+        return self.orchestrator.stage.value
+
+    def ask(self, text: str | None = None, /, **fields: Any) -> Card:
+        """Pose a question. Proposes; never runs (rule 3)."""
+        return self.orchestrator.ask(text, **fields)
+
+    def answer(self, **fields: Any) -> Card:
+        """Answer the clarification the last card asked for."""
+        return self.orchestrator.answer(**fields)
+
+    def accept(self, persona: str | None = None) -> Card:
+        """Run the proposal on screen, optionally naming whose."""
+        return self.orchestrator.accept(persona)
+
+    def override(
+        self,
+        candidate: str | Candidate | None = None,
+        reason: str | None = None,
+        *,
+        confirm: bool = False,
+    ) -> Card:
+        """Run a method the personas did not propose (Section 7.5)."""
+        return self.orchestrator.override(candidate, reason, confirm=confirm)
+
+    def modify(self, **changes: Any) -> Card:
+        """Change the question (alpha, design, a column) and re-propose."""
+        return self.orchestrator.modify(**changes)
+
+    def explain(self, topic: str) -> Card:
+        """Explain a term, or why a method is or is not eligible here."""
+        return self.orchestrator.explain(topic)
+
+    def goto_stage(self, name: str) -> Card:
+        """Jump to a stage, with Section 9.2's warning if it skips one."""
+        return self.orchestrator.goto_stage(name)
+
+    def skip(self) -> Card:
+        """Move to the next suggested stage without doing anything here."""
+        return self.orchestrator.skip()
+
+    def undo(self) -> Card:
+        """Move the branch head back one version (Section 12.1)."""
+        return self.orchestrator.undo()
+
+    def branch(self, name: str, *, version: str | None = None) -> Card:
+        """Start a new branch from the current head, or from `version`."""
+        return self.orchestrator.branch(name, version=version)
+
+    def switch_branch(self, name: str) -> Card:
+        """Make another branch active."""
+        return self.orchestrator.switch_branch(name)
+
+    # ---- version navigation --------------------------------------------
 
     def branch_from(self, name: str, *, version: str | None = None) -> VersionRecord:
         record = self.store.branch(name, from_version=version)
         self.save()
         return record
 
-    def switch_branch(self, name: str) -> VersionRecord:
+    def switch_to_branch(self, name: str) -> VersionRecord:
         record = self.store.switch_branch(name)
         self.save()
         return record
@@ -275,6 +354,14 @@ class Session:
             "store": self.store.to_state(),
             "provenance": self.provenance.model_dump(mode="json"),
             "ledger": self.test_ledger.model_dump(mode="json"),
+            # Which stage we are in, and which have been visited. Durable
+            # because Section 9.2's warning ("missing values haven't been
+            # reviewed") must survive a kernel restart, or it becomes a
+            # lie. The transient half -- a proposal on screen, a question
+            # awaiting an answer -- is deliberately not persisted: a
+            # resumed session re-asks rather than accepting into a context
+            # the user no longer has in front of them.
+            "orchestrator": self._turn_state.to_state(),
         }
 
     def save(self) -> Path:
@@ -326,6 +413,7 @@ class Session:
             test_ledger=TestLedger.model_validate(state["ledger"]),
             config=state.get("config", {}),
             created_at=datetime.fromisoformat(state["created_at"]),
+            _turn_state=TurnState.from_state(state.get("orchestrator", {})),
         )
 
 
@@ -344,7 +432,12 @@ def _proposal_views(verdict: PersonaVerdict | None) -> list[ProposalView]:
     ]
 
 
-def _render_code(chosen: Candidate | None) -> str:
+def _render_code(
+    chosen: Candidate | None,
+    override_reason: str | None = None,
+    preamble: str = "",
+    df_var: str = "df",
+) -> str:
     """The runnable line for a step, from the registry (rule 7).
 
     A `Candidate` carries only the params that identify the analysis -- the
@@ -366,9 +459,22 @@ def _render_code(chosen: Candidate | None) -> str:
         return ""
     try:
         params = {**_default_params(chosen.function), **dict(chosen.params)}
-        return registry.to_code(chosen.function, params)
+        call = registry.to_code(chosen.function, params, df_var=df_var)
     except Exception as exc:  # noqa: BLE001 - see docstring
-        return f"# could not render code for {chosen.function}: {exc}"
+        call = f"# could not render code for {chosen.function}: {exc}"
+    if preamble:
+        # Some methods run against a reshaped frame (a paired test needs the
+        # two measurements side by side). Rule 7 says the recorded step must
+        # be *runnable*, so the reshape is part of the step rather than
+        # something the exported notebook would be missing.
+        call = f"{preamble}\n{call}"
+    reason = (override_reason or "").strip()
+    if not reason:
+        return call
+    # Section 7.5: the reason is emitted as a code comment on export, so
+    # someone reading the notebook later sees why a flagged method was used
+    # at the point where it was used.
+    return f"# Override: {reason}\n{call}"
 
 
 def _default_params(function: str) -> dict[str, Any]:

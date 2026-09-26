@@ -11,7 +11,33 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+
+def to_jsonable(value: Any) -> Any:
+    """Convert numpy scalars and containers of them to plain Python.
+
+    Any field typed `Any` can end up holding a `numpy.int64` -- a method
+    param built from a column's own values, a summary statistic taken
+    straight from pandas -- and pydantic cannot serialise one. The failure
+    surfaces far from the cause: not when the value is stored, but later,
+    when `session.json` is written, as
+    `PydanticSerializationError: Unable to serialize unknown type`.
+
+    Section 12.4 makes that a correctness problem rather than an
+    inconvenience: a session that cannot be written cannot be resumed, and
+    the step that could not be saved is the one the user just accepted. So
+    the conversion happens at the boundary, on the way in.
+    """
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(key): to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        converted = [to_jsonable(item) for item in value]
+        return type(value)(converted) if isinstance(value, tuple) else converted
+    return value
 
 
 class SemanticType(StrEnum):
@@ -96,6 +122,13 @@ class Candidate(BaseModel):
     tags: set[str] = Field(default_factory=set)
     estimand: str
 
+    @field_validator("params", mode="before")
+    @classmethod
+    def _plain_python_params(cls, params: Any) -> Any:
+        """A param taken from the data can be a numpy scalar -- see
+        `to_jsonable`. Converted here so a `Candidate` is always writable."""
+        return to_jsonable(params)
+
     @field_serializer("tags")
     def _sorted_tags(self, tags: set[str]) -> list[str]:
         """Serialise tags in a fixed order.
@@ -176,6 +209,11 @@ class TransformRecord(BaseModel):
     summary_before: dict[str, Any] = Field(default_factory=dict)
     summary_after: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+
+    @field_validator("params", "summary_before", "summary_after", mode="before")
+    @classmethod
+    def _plain_python(cls, value: Any) -> Any:
+        return to_jsonable(value)
 
 
 # --- Profiling-stage result types (Section 6.1) -----------------------------

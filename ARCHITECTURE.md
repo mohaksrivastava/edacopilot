@@ -243,7 +243,9 @@ edacopilot/
 │       ├── orchestrator/
 │       │   ├── loop.py
 │       │   ├── state_machine.py
-│       │   └── intents.py
+│       │   ├── intents.py
+│       │   └── cards.py        # Card/ActionButton as plain data (Section 9.4);
+│       │                       # ui/cards.py renders them
 │       ├── llm/
 │       │   ├── client.py        # LiteLLM wrapper, retries, structured output
 │       │   ├── context.py       # ContextBuilder / privacy filter
@@ -974,6 +976,20 @@ Persona picks (Section 8): Professor → `mann_whitney` (clean assumptions, stri
 - `INELIGIBLE` overrides additionally show the failed hard assumption and its consequence, and require a second confirmation.
 - The reason is stored in `ProvenanceLog` and emitted as a code comment on export.
 
+Implemented in `orchestrator/loop.py` (M7). One clause is easy to read past
+and decides the design: the friction applies to `CAVEAT` and `INELIGIBLE`,
+**and only those**. Choosing an `ELIGIBLE` method no persona happened to
+name needs nothing — the engine already ruled it valid, so it is a choice
+among valid methods rather than an override of a judgement. Demanding a
+reason there would train the user to type anything to get past the box,
+which would devalue the reason on the overrides that matter.
+`Session.record_step` enforces the same rule, so the guard cannot be
+bypassed by calling the session directly.
+
+The second confirmation is a *separate* argument (`confirm=True`), not a
+second chance to supply the reason, and it does not carry over to a later
+override: two decisions, two acts.
+
 ---
 
 ## 8. Persona engine
@@ -1262,8 +1278,48 @@ class Card(BaseModel):
     actions: list[ActionButton] = []        # each maps to an Intent
 ```
 
+Implemented in `orchestrator/cards.py` (M7) as plain data — no ipywidgets,
+no matplotlib, no HTML. `Card.to_text()` renders the whole card as plain
+text, which is what makes Section 15.5's golden transcripts real
+transcripts rather than summaries of them; M8's `ui/cards.py` draws the
+same objects.
+
+Three additions to the field list above:
+
+- `result` also accepts a `PostHocResult`. Section 9.4 predates that model,
+  and a post-hoc's comparison table is exactly a result card's content.
+- `stage` records which stage produced the card, since Section 9.2's
+  warnings and Section 9.5's suggestions are both stage-scoped.
+- `graded` names which of the `diagnostics` actually decided an assumption.
+  Section 7.2's engine records *evidence* alongside verdicts
+  (`Resolution.evidence`), and some evidence reads FAIL while deciding
+  nothing — a `measurement_level` attempt against a scale no method
+  required. Both belong on the card (Section 7.4's own table lists
+  Shapiro's result, which is evidence under `normality_or_large_n`), but
+  they must not look alike: a reader who notices the diagnostics are padded
+  with irrelevant failures stops reading them, which is the one thing this
+  project cannot afford. The renderer prints verdicts first, then
+  "Also computed (evidence, not a verdict on any method)".
+
+Next-step suggestions (Section 9.5) are `actions`, not a separate field:
+they are buttons, and the rule that they are never executed automatically
+is a property of the loop, not of the card.
+
 ### 9.5 Next-step suggestions
 After each accepted step, the orchestrator shows 2–4 suggested next actions as buttons (deterministic rules first, optionally reworded by the LLM). Examples: after a significant k-group test → "Run post-hoc comparisons"; after imputation → "Compare distributions before/after imputation". It never executes them.
+
+M7's rules, in the order they are offered: the post-hoc a **significant**
+omnibus licenses; an equivalence test after a non-significant result; an
+explanation of a graded check that FAILed; the ledger once more than one
+test has run; and "ask another question". The 2–4 range is enforced rather
+than hoped for — a clean significant result with no failed assumption and
+no post-hoc would otherwise offer one button, and a lone button reads as a
+dead end at the moment the user most needs somewhere to go, so the effect
+size's explanation fills the gap.
+
+A post-hoc is offered only after a *significant* omnibus: running pairwise
+comparisons after a non-significant one is the inflation the omnibus exists
+to prevent.
 
 ---
 
@@ -1323,6 +1379,30 @@ Target ≤ 6k tokens per call so 8k-context local models work.
 - `answer_free_question`: glossary lookup (`llm/glossary.yaml`, **one line per term**, ~150 terms covering every assumption, test, effect size and missingness concept in the catalogue) or "not available offline".
 
 This is used when `deterministic_mode = true`, when the LLM is unreachable, and in all unit/conversation tests.
+
+Implemented in `llm/fallback.py` and `llm/glossary.yaml` (M7);
+`write_rationale` lives with its data in `personas/rationale.py` (M5), and
+`elicit_mnar`'s question bank arrives with the missingness stage in M10.
+
+- **`parse_intent` guesses narrowly and says when it is guessing.** A rule
+  fires on an unambiguous marker or not at all, and an unmatched message
+  returns `OTHER` below Section 9.1's floor so the orchestrator asks. A
+  ruleset stretched to cover everything would misroute *confidently*, which
+  is worse than not routing: the clarifying-question path only helps if the
+  confidence is honest.
+- **`build_question_spec` refuses to guess.** Without a model there is no
+  honest way to turn "is income different by region?" into a spec, so the
+  fallback returns the form's fields — with options taken from the actual
+  frame, so it cannot offer a column that is not there.
+- **The glossary has 207 terms**, above Section 10.5's ~150, and its
+  coverage is derived from the live registry by
+  `tests/unit/edacopilot/test_glossary.py`: registering a test or declaring
+  an assumption without defining it fails CI. The style is checked too —
+  one or two sentences, ending in a full stop, and not defined mostly in
+  terms of its own name — because a glossary whose entry for `sphericity`
+  reads "the sphericity assumption" has the same coverage and none of the
+  value. An alias table maps the phrasings a user would actually type
+  ("what is a p-value?", "Cohen's d", "Levene's test") onto the entries.
 
 ---
 
@@ -1417,6 +1497,22 @@ values), and a code template also references the ones with defaults (`ci`,
 exported notebook should state what it ran, including the seed, so the
 number can be reproduced without knowing this version's defaults. A test
 evaluates the recorded line and checks it returns the same p-value (rule 7).
+
+M7 added two things `Step.code` has to carry for that promise to hold in
+every case:
+
+- **An override's reason, as a comment above the call** (Section 7.5's last
+  clause). Someone reading the exported notebook meets the justification at
+  the line it applies to, not in a log they would have to go and find.
+- **A reshape, where the method needs one.** `edacore`'s paired tests take
+  two *columns* while a paired question arrives in long form (outcome,
+  group, subject). M4 recorded the two level names as the candidate's `a`
+  and `b` params and left the pivot to the orchestrator deliberately — the
+  eligibility engine reasons about the user's own columns, and pivoting
+  inside it would make every check report against a frame the user never
+  saw. So the step records the pivot as source too, because a notebook
+  whose paired t-test ran against a frame the notebook never built would
+  reproduce nothing.
 
 ### 12.3 TestLedger
 - Every executed hypothesis test is appended with its family label (e.g. "income comparisons").
@@ -1578,6 +1674,21 @@ Run manually or nightly, per configured model (including a local Ollama model):
 ### 15.5 Conversation tests
 Golden transcripts in `tests/conversations/` replay a sequence of user actions against a mocked LLM (recorded structured outputs) and assert the cards, steps, versions and exported notebook. Run in CI.
 
+M7 adds six, and there is no mock in them because in M7 there is nothing to
+mock: the system runs in deterministic mode all the way down (rule 9). When
+M9 adds the LLM, the recorded outputs slot in at `parse_intent` and
+`build_question_spec` and these same transcripts keep their meaning — which
+is why they drive the Python API rather than a UI.
+
+A transcript is compared as a whole: every card, plus the provenance,
+versions, ledger count and recorded code afterwards. That fails on a
+wording change as well as a behaviour change, deliberately — the wording of
+a card is most of what this product is, and a card nobody reads is a card
+that did not work, so it should not be able to change without someone
+looking at the diff. Regenerate with `python scripts/generate_transcripts.py`.
+`docs/sample_conversation.md` is rendered from the same transcript by the
+same renderer, so the document cannot drift from what the tests assert.
+
 ### 15.6 CI (`.github/workflows/ci.yml`, `.github/workflows/nightly.yml`)
 - `test` job matrix: Python 3.11, 3.12; Ubuntu + Windows. Steps: `ruff check`,
   `ruff format --check`, `pytest -m "not llm and not slow"`, export
@@ -1659,6 +1770,110 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-26 — M7 (tag `m7`)
+The orchestrator in deterministic mode (Section 9, with 7.5 and 10.5):
+the turn loop, the stage state machine, the cards, and the Python API that
+M8's panel will drive. No LLM call anywhere in this milestone.
+
+Deliverable for review: `docs/sample_conversation.md` — Section 7.4's
+worked example as plain-text cards, exactly as a user sees them.
+
+- **The conversational API is on `Session`** and every method returns a
+  `Card`: `ask`, `answer`, `accept`, `override`, `modify`, `explain`,
+  `goto_stage`, `skip`, `undo`, `branch`, `switch_branch`. `ledger()` keeps
+  returning rows, because it is data rather than a card and a notebook user
+  wants the table; `orchestrator.ledger_card()` renders it when a card is
+  what is wanted.
+  - `ask()` takes a `QuestionSpec`, keyword arguments (`goal=`, `outcome=`,
+    `group=`, `design=`), or free text. Free text goes through Section
+    10.5's keyword parser; anything it cannot resolve to columns returns
+    the form-style card rather than a guess.
+  - **Three renames were needed** to put the conversational verbs on the
+    names Section 9 uses. M6's `Session.accept(stage=..., chosen=...)` is
+    now `record_step`, which is what it does; the `branch` *property* is
+    now `active_branch`, freeing `branch(name)` for the action; and the
+    store-level `switch_branch` is now `switch_to_branch`. The old names
+    were the right ones for the new meanings, and leaving them on the
+    plumbing would have made the API read as an afterthought.
+- **Rule 3 is a property, not a promise.** Only `accept` and `override`
+  reach `record_step`. A hypothesis property test drives random sequences
+  of the seventeen non-accepting actions and asserts no step, no ledger
+  entry and no data version appears; a second test checks the call graph
+  itself, so a conversational method added later that forgot the rule fails
+  immediately rather than when someone remembers to add it to the list.
+- **The design question reaches the user before any persona card.** Not by
+  convention but by construction: `select_candidates` raises
+  `AmbiguousSpecError` on a spec with open ambiguities, and a persona can
+  only choose from a `CandidateSet`, so there is no path to a proposal that
+  does not pass through the question. Tested for all three design claims on
+  `paired_as_independent`, including that the orchestrator never edits
+  `spec.design` itself.
+- **Section 7.5's friction applies to CAVEAT and INELIGIBLE only** — see
+  Section 7.5 for why an ELIGIBLE method needs none. An INELIGIBLE override
+  shows the failed hard assumption *and* its consequence, and needs the
+  reason and a separate `confirm=True`; five parametrised combinations of
+  the two gates assert none of them runs anything, and the internal path
+  raises `OverrideRequired` rather than returning a card, so a bug there
+  fails loudly instead of running the method.
+- **Stage modules.** PROFILE, EXPLORE (read-only) and HYPOTHESIS are
+  implemented; QUALITY, MISSINGNESS, OUTLIERS, TRANSFORM, TIMESERIES, TEXT
+  and EXPORT return an info card naming the milestone that brings them, and
+  **refuse** to build a spec or execute. A stub that returned something
+  empty would let a user believe the stage had run, which is the failure
+  this project exists to prevent. `allowed_functions` is enforced, not
+  documented: a stage that calls outside its scope raises.
+- **Section 9.2's jump warning names a number from this dataset.**
+  "Missing values haven't been reviewed; 12% of `income` is missing and
+  tests will drop those rows" teaches something; "you skipped missingness"
+  does not. One line, with the other skipped stages in a parenthetical —
+  a wall of warnings at every jump is a wall the user learns to scroll
+  past. When several stages were skipped, missingness speaks first: missing
+  rows are dropped without appearing anywhere the user looks, while a
+  duplicate at least leaves a visible count behind. EXPLORE never warns
+  (read-only), and the two conditional stages sit outside the main line so
+  a frame with no text columns is never warned about TEXT.
+- **Which stage you are in, and which you have visited, are persisted**
+  (`state_version` 2). Section 9.2's warning has to survive a kernel
+  restart or it becomes a lie. The transient half — a proposal on screen, a
+  question awaiting an answer — deliberately is not: a resumed session
+  re-asks rather than accepting into a context the user no longer has in
+  front of them.
+- **Post-hoc candidates inherit the omnibus's eligibility.** A post-hoc is
+  in no Section 7.3 family: it is not something the user asks for, it is
+  something a significant omnibus licenses. Rather than invent a fresh
+  ELIGIBLE verdict for it — which would claim a check that never ran — the
+  candidate carries the status and reasons of the omnibus the user
+  accepted, and the card says so. Its p-values stay out of the session
+  adjustment exactly as Section 12.3 requires, asserted in the transcript's
+  ledger.
+- **Six golden transcripts** (Section 15.5), covering the 7.4 worked
+  example end to end, `paired_as_independent` from design question to
+  result, an INELIGIBLE override with both gates, undo followed by a
+  branch, a significant Kruskal-Wallis followed by an accepted post-hoc,
+  and a jump to HYPOTHESIS with untreated missing data.
+
+Three fixes to earlier milestones that only became visible once cards
+existed to show their output:
+
+- **`check_measurement_level`'s consequence read "'income' looks like
+  continuous, not continuous" on every PASS.** The wording was
+  unconditional. It is phrased for the status it actually has now — that
+  single line, repeated down a diagnostics table, is how a reader learns to
+  stop reading diagnostics.
+- **Evidence was indistinguishable from verdicts.** `CandidateSet` now
+  records which fact_ids graded an assumption (`graded`, and
+  `graded_checks()`), so a card can print verdicts and evidence separately
+  instead of showing a `measurement_level` FAIL against a scale no method
+  required as though it had decided something. Section 9.4 has the full
+  argument.
+- **A numpy scalar in `Candidate.params` made a session unwritable.**
+  `cochran_armitage_trend`'s `event` param is taken from the column's own
+  values, so it arrives as `numpy.int64`, and pydantic cannot serialise
+  one. The failure surfaced far from the cause — not when the value was
+  stored but later, when `session.json` was written, on the step the user
+  had just accepted. `edacore.contracts.to_jsonable` converts at the
+  boundary, on every `Any`-typed field that can hold data-derived values.
 
 ### 2026-09-26 — M6.1 (tag `m6.1`)
 Three fixes ahead of M7, each closing a gap M6 left that M7 would have

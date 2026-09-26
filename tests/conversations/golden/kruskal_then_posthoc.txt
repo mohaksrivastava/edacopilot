@@ -1,0 +1,191 @@
+# A significant Kruskal-Wallis, then an accepted post-hoc
+
+Waiting times at three clinics, heavily right-skewed. The omnibus says the clinics differ but not which; the suggested next step is the post-hoc whose own correction matches the design. Section 12.3's rule is visible in the ledger at the end: the post-hoc is recorded but does not count toward the session adjustment, because its comparisons are already corrected within their own family.
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.ask(goal="compare_groups", outcome="wait_minutes",
+                group="clinic", design="independent",
+                confirmed_by_user=["design"])
+
+EDACOPILOT:
+    [divergence] The personas disagree (2 proposals)
+    stage: hypothesis
+
+    Professor + Consultant → Kruskal-Wallis. Maverick → a permutation ANOVA.
+
+    Family: `k_independent_numeric`. 5 method(s) considered, 2 eligible.
+
+    | Method | Status | Estimates |
+    |---|---|---|
+    | `kruskal_wallis` | eligible | stochastic dominance across k independent groups |
+    | `permutation_anova` | eligible | mean of the outcome across k independent groups, permutation-based p-value |
+    | `welch_anova` | caveat | mean of the outcome across k independent groups, unequal variance |
+    | `alexander_govern` | caveat | mean of the outcome across k independent groups, robust to unequal variance |
+    | `one_way_anova` | caveat | mean of the outcome across k independent groups |
+
+    Nothing has run. Accept a proposal, or override with a method of your own.
+
+    Diagnostics (these decided which methods are valid):
+      UNTESTABLE  independence.design
+                  -> Independence depends on how the data was collected, not just its values; confirm the design with whoever collected it.
+      PASS        independent.design=independent.required=independent
+                  -> An independent-samples test treats every row as a separate subject; if the same subject appears more than once, it counts one person's repeated readings as independent evidence and reports more certainty than the data supports.
+      PASS        measurement_level.wait_minutes.continuous statistic=0.9
+                  -> 'wait_minutes' is continuous, which a method built for continuous data can use.
+      BORDERLINE  normality.descriptive.wait_minutes.clinic=A statistic=1.809
+                  -> Skew or heavy tails distort the mean and standard-deviation-based methods; check alongside a formal normality test.
+      FAIL        normality.descriptive.wait_minutes.clinic=B statistic=2.073
+                  -> Skew or heavy tails distort the mean and standard-deviation-based methods; check alongside a formal normality test.
+      BORDERLINE  normality.descriptive.wait_minutes.clinic=C statistic=1.903
+                  -> Skew or heavy tails distort the mean and standard-deviation-based methods; check alongside a formal normality test.
+      FAIL        normality.shapiro.wait_minutes.clinic=A statistic=0.7975 p=6.014e-06
+                  -> If normality fails, parametric tests that assume it may mislead; prefer a robust or nonparametric alternative.
+      FAIL        normality.shapiro.wait_minutes.clinic=B statistic=0.7704 p=1.731e-06
+                  -> If normality fails, parametric tests that assume it may mislead; prefer a robust or nonparametric alternative.
+      FAIL        normality.shapiro.wait_minutes.clinic=C statistic=0.7915 p=4.524e-06
+                  -> If normality fails, parametric tests that assume it may mislead; prefer a robust or nonparametric alternative.
+      FAIL        normality_or_large_n.group=B.variable=wait_minutes statistic=40
+                  -> This sample is skewed enough, for its size, that the mean's sampling distribution is not yet symmetric -- so a test built on it can be off-centre, not merely imprecise.
+      PASS        same_shape.wait_minutes.clinic statistic=0.1 p=1
+                  -> Different distribution shapes mean a Mann-Whitney result reflects general stochastic dominance, not specifically a difference in medians.
+      FAIL        variance.levene.wait_minutes.clinic statistic=7.319 p=0.001012
+                  -> Unequal variances bias standard-error estimates in tests that assume equal spread; prefer a Welch-type correction.
+
+    Also computed (evidence, not a verdict on any method):
+      FAIL        measurement_level.wait_minutes.binary statistic=0.9
+                  -> 'wait_minutes' looks like continuous, not binary; a method built for binary data may not mean what it claims here.
+      PASS        measurement_level.wait_minutes.discrete statistic=0.9
+                  -> 'wait_minutes' is continuous, which a method built for discrete data can use.
+      FAIL        measurement_level.wait_minutes.ordinal statistic=0.9
+                  -> 'wait_minutes' looks like continuous, not ordinal; a method built for ordinal data may not mean what it claims here.
+
+    Proposals:
+      Professor -> kruskal_wallis [eligible]
+          Kruskal-Wallis is the method whose assumptions this data actually meets; every assumption it makes is checked and holds here; though independence depends on how the data was collected, not just its values.
+      Consultant -> kruskal_wallis [eligible]
+          Use Kruskal-Wallis.
+      Maverick -> permutation_anova [eligible]
+          A permutation ANOVA is worth a look here; it assumes less than the standard choice; though independence depends on how the data was collected, not just its values.
+
+    Next:
+      [Professor + Consultant: kruskal_wallis]   (session.accept("professor"))
+      [Maverick: permutation_anova]   (session.accept("maverick"))
+      [Use something else (e.g. welch_anova)]   (session.override("welch_anova"))
+      [Why this method?]   (session.explain("kruskal_wallis"))
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.accept("professor")
+
+EDACOPILOT:
+    [result] kruskal_wallis: stochastic dominance across k independent groups
+    stage: hypothesis
+
+    Test #1 in this session, recorded as step `s0` on branch `main`.
+
+    Code:
+
+    ```python
+    edacore.stattests.k_independent.kruskal_wallis(df, outcome='wait_minutes', group='clinic', ci=0.95, nan_policy='omit')
+    ```
+
+    Result:
+      test        kruskal_wallis (stochastic dominance of 'wait_minutes' across groups of 'clinic')
+      H           14.83
+      df          2
+      p (raw)     0.0006031
+      p (adj)     0.0006031
+      effect      epsilon_squared = 0.1246  95% CI [0.0289, 0.2441] (medium)
+      n used      A=40, B=40, C=40
+
+    Next:
+      [Run post-hoc comparisons (dunn_test)]   (session.ask("run post-hoc comparisons"))
+      [Explain normality]   (session.explain("normality"))
+      [Ask another question]   (session.ask(goal=..., outcome=..., group=...))
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.ask("run post-hoc comparisons")
+
+    (Free text, routed by Section 10.5's keyword rules. The suggestion button on the previous card produces the same intent.)
+
+EDACOPILOT:
+    [consensus] Post-hoc: dunn_test
+    stage: hypothesis
+
+    `kruskal_wallis` was significant, which says the groups differ but not which ones. `dunn_test` answers that: pairwise rank comparisons, Holm-adjusted within the family of pairs.
+
+    Its p-values are adjusted within its own family of pairs and are deliberately kept out of the session-wide adjustment, which would correct them twice (Section 12.3). It does not add to the session test count.
+
+    Its eligibility is inherited from the `kruskal_wallis` result you accepted (**eligible**): the assumptions it rests on are the ones already checked there.
+
+    Next:
+      [Run dunn_test]   (session.accept())
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.accept()
+
+EDACOPILOT:
+    [result] dunn_test — pairwise comparisons
+    stage: hypothesis
+
+    Licensed by the significant `kruskal_wallis` above.
+
+    These 3 p-values are adjusted within this procedure's own family by holm. They are deliberately *not* pooled into the session-wide adjustment, which would correct them twice (Section 12.3), and they do not change the session test count.
+
+    Recorded as step `s1`.
+
+    Result:
+      procedure   dunn_test (Dunn)
+      adjustment  holm within this family of 3
+
+    Comparisons:
+      A vs B:  p=0.8647  p(adj)=0.8647
+      A vs C:  p=0.0006341  p(adj)=0.001902
+      B vs C:  p=0.001169  p(adj)=0.002339
+
+    Next:
+      [Ask another question]   (session.ask(goal=..., outcome=..., group=...))
+      [Show the test ledger]   (session.ledger())
+      [Branch to try a different path]   (session.branch("alternative"))
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.ledger()
+
+EDACOPILOT:
+    [info] Test ledger
+    stage: hypothesis
+
+    1 test(s) counted toward the session adjustment, using **holm**.
+
+    | # | test | family | p (raw) | p (adj, session) | p (adj, family) | counts |
+    |---|---|---|---|---|---|---|
+    | t0 | `kruskal_wallis` | wait_minutes comparisons | 0.0006031 | 0.0006031 | 0.0006031 | yes |
+    | t1 | `dunn_test` | dunn_test comparisons | — | — | — | no |
+
+    A post-hoc procedure is recorded but does not count: its comparisons are already adjusted within their own family, and pooling them here would correct them twice (Section 12.3).
+
+--------------------------------------------------------------------------
+
+SESSION AFTERWARDS
+
+  branch: main   version: v0
+  branches: main
+  versions: v0
+  tests counted toward the session adjustment: 1
+
+  provenance:
+    s0  hypothesis  kruskal_wallis           via professor
+    s1  hypothesis  dunn_test                via consensus
+
+  code (rule 7 — every accepted step, runnable):
+    edacore.stattests.k_independent.kruskal_wallis(df, outcome='wait_minutes', group='clinic', ci=0.95, nan_policy='omit')
+    edacore.stattests.posthoc.dunn_test(df, outcome='wait_minutes', group='clinic', p_adjust='holm', nan_policy='omit')

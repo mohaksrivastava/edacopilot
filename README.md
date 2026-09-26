@@ -6,8 +6,25 @@ showing results and comparing trade-offs across three personas (Professor,
 Consultant, Maverick) before the user decides.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full specification and build
-plan. The project is currently at milestone M6 (session state); a quickstart
-notebook and usage docs land in M15.
+plan. The project is currently at milestone M7 (the orchestrator, driven from
+Python); the Jupyter panel lands in M8 and a quickstart notebook in M15.
+
+[docs/sample_conversation.md](docs/sample_conversation.md) shows a whole
+session as the user sees it. Everything runs with **no LLM configured** —
+that is the supported mode today, and it is how the test suite runs.
+
+```python
+import pandas as pd
+from edacopilot.session import Session
+
+session = Session.start(pd.read_csv("survey.csv"))
+session.goto_stage("profile")
+session.ask(goal="compare_groups", outcome="income", group="region", design="independent")
+# ... read the card, then:
+session.accept("professor")
+```
+
+Nothing runs until you accept it.
 
 ## ⚠️ `.edacopilot/` contains your data — gitignore it
 

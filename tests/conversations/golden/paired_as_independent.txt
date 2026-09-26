@@ -1,0 +1,131 @@
+# The paired_as_independent trap: the design question comes first
+
+Section 15.3's trap. The same 30 subjects are measured before and after, but the question is asked as though the groups were independent. The engine refuses to propose anything until the design is settled — no persona is consulted, because `select_candidates` raises `AmbiguousSpecError` on a spec with open ambiguities and a persona can only choose from a `CandidateSet`.
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.ask(goal="compare_groups", outcome="score", group="condition",
+                design="independent")
+
+EDACOPILOT:
+    [question] One question first
+    stage: hypothesis
+
+    Before any method can be proposed, this needs an answer. The design is the single most consequential choice in a group comparison: it decides which tests are valid at all.
+
+    - 30 value(s) of 'subject_id' (which looks like a subject id, though the question did not name it) appear in more than one 'condition' group, so the same subject seems to be measured more than once. The question was read as comparing independent groups. Are these paired measurements on the same subjects, or does 'subject_id' mean something else here?
+
+    Next:
+      [They are paired / repeated measurements]   (session.answer(design="paired"))
+      [They are independent groups]   (session.answer(design="independent"))
+      [Explain the difference]   (session.explain("paired"))
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.answer(design="paired")
+
+EDACOPILOT:
+    [consensus] All three personas agree
+    stage: hypothesis
+
+    All three personas agree: a paired t-test.
+
+    Family: `two_paired_numeric`. 4 method(s) considered, 4 eligible.
+
+    | Method | Status | Estimates |
+    |---|---|---|
+    | `paired_t` | eligible | mean difference between paired measurements |
+    | `permutation_test_paired` | eligible | mean difference between paired measurements (permutation-based p-value) |
+    | `wilcoxon_signed_rank` | eligible | median difference between paired measurements |
+    | `sign_test_paired` | eligible | median difference between paired measurements (sign only) |
+
+    Nothing has run. Accept a proposal, or override with a method of your own.
+
+    Diagnostics (these decided which methods are valid):
+      PASS        measurement_level.score.continuous statistic=0.9
+                  -> 'score' is continuous, which a method built for continuous data can use.
+      PASS        normality.descriptive.score.condition=after statistic=-0.03428
+                  -> Skew or heavy tails distort the mean and standard-deviation-based methods; check alongside a formal normality test.
+      PASS        normality.descriptive.score.condition=before statistic=-0.2874
+                  -> Skew or heavy tails distort the mean and standard-deviation-based methods; check alongside a formal normality test.
+      PASS        normality.shapiro.score.condition=after statistic=0.9785 p=0.7836
+                  -> If normality fails, parametric tests that assume it may mislead; prefer a robust or nonparametric alternative.
+      PASS        normality.shapiro.score.condition=before statistic=0.9811 p=0.8548
+                  -> If normality fails, parametric tests that assume it may mislead; prefer a robust or nonparametric alternative.
+      UNTESTABLE  normality_of_differences.untestable
+                  -> the paired differences cannot be formed: no matching subject id across groups
+      PASS        paired.design=paired.required=paired
+                  -> A paired test subtracts each subject's own two measurements; without a real one-to-one link between rows, that subtraction pairs unrelated observations.
+      UNTESTABLE  symmetry_of_differences.untestable
+                  -> the paired differences cannot be formed: no matching subject id across groups
+
+    Also computed (evidence, not a verdict on any method):
+      FAIL        measurement_level.score.binary statistic=0.9
+                  -> 'score' looks like continuous, not binary; a method built for binary data may not mean what it claims here.
+      PASS        measurement_level.score.discrete statistic=0.9
+                  -> 'score' is continuous, which a method built for discrete data can use.
+      FAIL        measurement_level.score.ordinal statistic=0.9
+                  -> 'score' looks like continuous, not ordinal; a method built for ordinal data may not mean what it claims here.
+
+    Proposals:
+      Professor -> paired_t [eligible]
+          A paired t-test is the method whose assumptions this data actually meets; every assumption it makes is checked and holds here; though the paired differences cannot be formed: no matching subject id across groups.
+      Consultant -> paired_t [eligible]
+          Use a paired t-test.
+      Maverick -> paired_t [eligible]
+          Maverick concurs with Professor on a paired t-test: every assumption these methods make is met, so an alternative would add unfamiliarity without adding information.
+
+    Next:
+      [Run paired_t]   (session.accept())
+      [Use something else (e.g. permutation_test_paired)]   (session.override("permutation_test_paired"))
+      [Why this method?]   (session.explain("paired_t"))
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.accept()
+
+EDACOPILOT:
+    [result] paired_t: mean difference between paired measurements
+    stage: hypothesis
+
+    Test #1 in this session, recorded as step `s0` on branch `main`.
+
+    Code:
+
+    ```python
+    wide = df.pivot(index='subject_id', columns='condition', values='score')
+    edacore.stattests.two_sample.paired_t(wide, a='before', b='after', ci=0.95, nan_policy='omit')
+    ```
+
+    Result:
+      test        paired_t (mean difference between 'before' and 'after')
+      t           -7.335
+      df          29
+      p (raw)     4.427e-08
+      p (adj)     4.427e-08
+      estimate    -6.433  95% CI [-8.227, -4.64]
+      effect      d_z = -1.339  95% CI [-1.829, -0.8374] (large)
+      n used      before-after=30
+
+    Next:
+      [Ask another question]   (session.ask(goal=..., outcome=..., group=...))
+      [Explain d_z]   (session.explain("d_z"))
+
+--------------------------------------------------------------------------
+
+SESSION AFTERWARDS
+
+  branch: main   version: v0
+  branches: main
+  versions: v0
+  tests counted toward the session adjustment: 1
+
+  provenance:
+    s0  hypothesis  paired_t                 via consensus
+
+  code (rule 7 — every accepted step, runnable):
+    wide = df.pivot(index='subject_id', columns='condition', values='score')
+    edacore.stattests.two_sample.paired_t(wide, a='before', b='after', ci=0.95, nan_policy='omit')

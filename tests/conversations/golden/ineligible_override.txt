@@ -1,0 +1,156 @@
+# Overriding an ineligible method: a reason and a second confirmation
+
+Section 7.5's harder gate. `cochran_armitage_trend` needs a binary outcome and `tenure_months` is not one, so a hard assumption fails and the method is INELIGIBLE. The first override call is refused with the failed assumption and its consequence; only a second call carrying both the reason and `confirm=True` runs it.
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.ask(goal="association", x="satisfaction", y="tenure_months",
+                design="independent", confirmed_by_user=["design", "x", "y"])
+
+EDACOPILOT:
+    [consensus] All three personas agree
+    stage: hypothesis
+
+    All three personas agree: Spearman's correlation.
+
+    Family: `ordinal_any`. 3 method(s) considered, 2 eligible.
+
+    | Method | Status | Estimates |
+    |---|---|---|
+    | `spearman` | eligible | monotonic association between two variables |
+    | `kendall_tau` | eligible | ordinal association between two variables |
+    | `cochran_armitage_trend` | ineligible | linear trend in proportion across ordered exposure levels |
+
+    Nothing has run. Accept a proposal, or override with a method of your own.
+
+    Diagnostics (these decided which methods are valid):
+      PASS        measurement_level.satisfaction.ordinal statistic=0.75
+                  -> 'satisfaction' is ordinal, which a method built for ordinal data can use.
+      FAIL        measurement_level.tenure_months.binary statistic=0.85
+                  -> 'tenure_months' looks like discrete, not binary; a method built for binary data may not mean what it claims here.
+      PASS        measurement_level.tenure_months.discrete statistic=0.85
+                  -> 'tenure_months' is discrete, which a method built for discrete data can use.
+      PASS        monotonicity.satisfaction.tenure_months statistic=0
+                  -> A non-monotonic relationship (a U shape, say) can leave Spearman's rho near zero while the two variables are strongly related, so the correlation would report 'no association' for data that has an obvious one.
+
+    Also computed (evidence, not a verdict on any method):
+      FAIL        measurement_level.satisfaction.binary statistic=0.75
+                  -> 'satisfaction' looks like ordinal, not binary; a method built for binary data may not mean what it claims here.
+      FAIL        measurement_level.satisfaction.continuous statistic=0.75
+                  -> 'satisfaction' looks like ordinal, not continuous; a method built for continuous data may not mean what it claims here.
+      FAIL        measurement_level.satisfaction.discrete statistic=0.75
+                  -> 'satisfaction' looks like ordinal, not discrete; a method built for discrete data may not mean what it claims here.
+      FAIL        measurement_level.tenure_months.continuous statistic=0.85
+                  -> 'tenure_months' looks like discrete, not continuous; a method built for continuous data may not mean what it claims here.
+      FAIL        measurement_level.tenure_months.ordinal statistic=0.85
+                  -> 'tenure_months' looks like discrete, not ordinal; a method built for ordinal data may not mean what it claims here.
+
+    Proposals:
+      Professor -> spearman [eligible]
+          Spearman's correlation is the method whose assumptions this data actually meets; every assumption it makes is checked and holds here.
+      Consultant -> spearman [eligible]
+          Use Spearman's correlation.
+      Maverick -> spearman [eligible]
+          Maverick concurs with Professor on Spearman's correlation: nothing in this family is inside this persona's method pool.
+
+    Next:
+      [Run spearman]   (session.accept())
+      [Use something else (e.g. kendall_tau)]   (session.override("kendall_tau"))
+      [Why this method?]   (session.explain("spearman"))
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.override("cochran_armitage_trend",
+                     reason="the reviewer asked for a trend test")
+
+    (A reason alone is not enough for an ineligible method.)
+
+EDACOPILOT:
+    [override_confirm] cochran_armitage_trend is ineligible — confirm to run it anyway
+    stage: hypothesis
+
+    `cochran_armitage_trend` is **ineligible** for this data. This is not a caveat: a hard assumption has failed, so the number it returns will not mean what the method claims it means.
+
+    **What failed, and what it does to the result:**
+
+    - **measurement_level** (measurement_level.tenure_months.binary) is FAIL
+      - 'tenure_months' looks like discrete, not binary; a method built for binary data may not mean what it claims here.
+
+    **Valid alternatives the engine found:**
+
+    - `spearman` — monotonic association between two variables
+    - `kendall_tau` — ordinal association between two variables
+
+    To go ahead anyway, both of these are required:
+
+    1. a typed reason (given: the reviewer asked for a trend test)
+    2. a second, separate confirmation
+
+    ```python
+    session.override("cochran_armitage_trend", reason="...", confirm=True)
+    ```
+
+    Diagnostics (these decided which methods are valid):
+      FAIL        measurement_level.tenure_months.binary statistic=0.85
+                  -> 'tenure_months' looks like discrete, not binary; a method built for binary data may not mean what it claims here.
+
+    Next:
+      [Yes, run cochran_armitage_trend anyway]   (session.override("cochran_armitage_trend", reason="...", confirm=True))
+      [Use spearman instead]   (session.accept())
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.override("cochran_armitage_trend",
+                     reason="the reviewer asked for a trend test", confirm=True)
+
+    (The reason is written into the recorded code as a comment.)
+
+EDACOPILOT:
+    [result] cochran_armitage_trend: linear trend in proportion across ordered exposure levels
+    stage: hypothesis
+
+    **Override.** Reason given: “the reviewer asked for a trend test”
+
+    Test #1 in this session, recorded as step `s0` on branch `main`.
+
+    Code:
+
+    ```python
+    # Override: the reviewer asked for a trend test
+    edacore.stattests.categorical.cochran_armitage_trend(df, binary='tenure_months', ordinal='satisfaction', event=99, nan_policy='omit')
+    ```
+
+    Result:
+      test        cochran_armitage_trend (linear trend in proportion of 'tenure_months'==99 across levels of 'satisfaction')
+      Z           1.322
+      p (raw)     0.186
+      p (adj)     0.186
+      n used      total=200
+
+    Validity notes:
+      - Not significant does not mean no effect. No interval was computed here, so the result does not bound how large the effect could still be; consider an equivalence test if 'no difference' is the claim.
+      - Association only; it does not show that one variable causes the other.
+
+    Next:
+      [Test for equivalence instead]   (session.ask(goal="equivalence", ..., equivalence_bounds=(lo, hi)))
+      [Explain measurement_level]   (session.explain("measurement_level"))
+      [Ask another question]   (session.ask(goal=..., outcome=..., group=...))
+
+--------------------------------------------------------------------------
+
+SESSION AFTERWARDS
+
+  branch: main   version: v0
+  branches: main
+  versions: v0
+  tests counted toward the session adjustment: 1
+
+  provenance:
+    s0  hypothesis  cochran_armitage_trend   via override  override reason: "the reviewer asked for a trend test"
+
+  code (rule 7 — every accepted step, runnable):
+    # Override: the reviewer asked for a trend test
+    edacore.stattests.categorical.cochran_armitage_trend(df, binary='tenure_months', ordinal='satisfaction', event=99, nan_policy='omit')

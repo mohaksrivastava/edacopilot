@@ -26,6 +26,7 @@ from .spec import (
     QuestionSpec,
     describe_spec,
     require_resolved,
+    subject_column,
     validate_spec,
 )
 
@@ -43,6 +44,7 @@ __all__ = [
     "describe_spec",
     "require_resolved",
     "resolve",
+    "subject_column",
     "select_candidates",
     "validate_spec",
 ]

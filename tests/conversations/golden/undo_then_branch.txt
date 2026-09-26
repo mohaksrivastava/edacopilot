@@ -1,0 +1,74 @@
+# Undo, then branch from the version the undo moved off
+
+An undo moves the branch head; it does not delete the version and it does not erase the step from the provenance log. So a version you undo is still there to branch from, which is what makes an undo safe to try.
+
+The data version here is created with `session.record_step(new_data=...)`, standing in for the cleaning step the QUALITY stage will make in M11. Every other action in this transcript is the ordinary conversational API.
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.record_step(stage="quality",
+                        new_data=session.data.query("income < 120000"),
+                        label="trimmed the top tail")
+
+EDACOPILOT:
+    [info] Data version created
+    stage: quality
+
+    Step `s0` created version `v1` from `v0`: 76 rows, down from 79.
+
+    Nothing is edited in place — `v0` stays read-only, so this is reversible.
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.undo()
+
+EDACOPILOT:
+    [info] Undone: back to v0
+    stage: profile
+
+    The head of branch `main` moved from `v1` to `v0` (79 rows).
+
+    `v1` is not deleted — `session.branch(...)` from it, or redo by switching, if you change your mind. The step that created it is still in the provenance log.
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.branch("kept-the-tail", version="v1")
+
+    (Branching from `v1` — the version the undo moved off — recovers it without losing the main branch.)
+
+EDACOPILOT:
+    [info] On branch kept-the-tail
+    stage: profile
+
+    Branched from `v1`. Work here does not affect `main`; switch with `session.switch_branch(name)`.
+
+    Branches: `kept-the-tail`, `main`.
+
+--------------------------------------------------------------------------
+
+YOU:
+    session.switch_branch("main")
+
+EDACOPILOT:
+    [info] On branch main
+    stage: profile
+
+    Head is `v0` (79 rows). Branches: `kept-the-tail`, `main`.
+
+--------------------------------------------------------------------------
+
+SESSION AFTERWARDS
+
+  branch: main   version: v0
+  branches: kept-the-tail, main
+  versions: v0, v1
+  tests counted toward the session adjustment: 0
+
+  provenance:
+    s0  quality     —                        via consensus
+
+  code (rule 7 — every accepted step, runnable):
+    (nothing was accepted)

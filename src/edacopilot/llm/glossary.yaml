@@ -1,0 +1,747 @@
+# One-line definitions for every term in the catalogue (Section 10.5).
+#
+# This is what `session.explain(topic)` answers from with the LLM switched
+# off, which in this build is always. Section 10.5 asks for "one line per
+# term, ~150 terms covering every assumption, test, effect size and
+# missingness concept in the catalogue", and
+# `tests/unit/edacopilot/test_glossary.py` derives the required set from the
+# live registry -- so registering a new test or assumption without defining
+# it here fails CI.
+#
+# House style, because these are read by someone who does not already know
+# the answer:
+#   - One sentence. If it needs two, the first says what it is and the
+#     second says when it matters.
+#   - Say what it does, not what it is named after. "Welch's t-test" is not
+#     an explanation of welch_t.
+#   - Name the consequence where there is one. A definition of `sphericity`
+#     that does not mention inflated false positives has not helped.
+#   - No symbols the reader would have to look up. "the chance of seeing a
+#     difference this big if there were really none" beats "P(D|H0)".
+
+terms:
+  # --- core vocabulary ---------------------------------------------------
+  p_value: >-
+    The chance of seeing a difference at least this large if there were really no
+    difference at all; a small p-value means the data would be surprising under
+    "no effect", not that the effect is large or important.
+  alpha: >-
+    The p-value threshold you agree to call "significant" before looking, usually
+    0.05; it is the false-positive rate you are accepting, not a property of the data.
+  adjusted_p_value: >-
+    A p-value corrected for how many tests you ran, so that running twenty
+    comparisons does not hand you a "significant" result by chance alone.
+  null_hypothesis: >-
+    The claim the test tries to rule out, almost always "there is no difference
+    or no association here".
+  confidence_interval: >-
+    A range of values the data is compatible with; a 95% interval is built so that
+    intervals made this way contain the true value 95% of the time.
+  effect_size: >-
+    How big the difference or association is, on a scale that does not grow with
+    sample size -- the number that says whether a significant result matters.
+  effect_magnitude: >-
+    A conventional label (negligible, small, medium, large) for an effect size;
+    a starting point for discussion, not a verdict, since what counts as large
+    is field-dependent.
+  statistical_power: >-
+    The chance a test would detect an effect of a given size if it were really
+    there; low power means a non-significant result tells you very little.
+  type_i_error: >-
+    Concluding there is an effect when there is none -- a false positive, whose
+    rate is what alpha controls.
+  type_ii_error: >-
+    Missing a real effect -- a false negative, whose rate is what power controls.
+  degrees_of_freedom: >-
+    Roughly, how many independent pieces of information the estimate rests on;
+    it sets the shape of the reference distribution the p-value is read from.
+  one_tailed: >-
+    A test that only looks for a difference in one direction; it must be chosen
+    before seeing the data, or it is just a way of halving the p-value.
+  two_tailed: >-
+    A test that looks for a difference in either direction; the default, and the
+    honest choice unless the direction was fixed in advance.
+  omnibus_test: >-
+    A test that asks whether any of several groups differ, without saying which;
+    a significant result is a reason to look further, not a finding about a pair.
+  post_hoc_test: >-
+    A follow-up comparison of specific pairs, run after a significant omnibus test
+    and corrected for the number of pairs it looks at.
+  multiple_testing: >-
+    Running many tests inflates the chance that at least one looks significant by
+    accident; correcting for it keeps the overall false-positive rate at alpha.
+  family_of_tests: >-
+    A group of tests answering one question together, corrected as a set; which
+    tests belong in a family is a judgement about the question, not about the data.
+  parametric: >-
+    A method that assumes the data follows a particular distribution, usually a
+    normal one, and gains precision when that assumption holds.
+  nonparametric: >-
+    A method that works from ranks or counts rather than from an assumed
+    distribution, so it survives skew and outliers at some cost in precision.
+  robust_method: >-
+    A method built to give the right answer even when an assumption is mildly
+    violated, typically by downweighting extreme values.
+  resampling: >-
+    Building the reference distribution from the data itself by shuffling or
+    redrawing it, instead of assuming a formula for it.
+  bootstrap: >-
+    Resampling the data with replacement many times to see how much a statistic
+    would vary, which gives a confidence interval without a distributional assumption.
+  permutation_test: >-
+    Shuffling the group labels many times to see how often chance alone produces
+    a difference as large as the observed one.
+  trimmed_mean: >-
+    The mean after discarding a fixed percentage from each tail, which keeps a
+    mean-like interpretation while ignoring extreme values.
+  rank_based: >-
+    A method that replaces values by their position in the sorted order, so only
+    the ordering matters and extreme values lose their leverage.
+  stochastic_dominance: >-
+    One group tends to produce larger values than another; what a rank test
+    actually shows, which is not the same as a difference in medians.
+  estimand: >-
+    The quantity a test is actually about -- a difference in means, a correlation,
+    a probability of being larger -- as opposed to the p-value it reports.
+  equivalence_testing: >-
+    Testing whether a difference is small enough to ignore; the only way to
+    support "these are the same", which an ordinary non-significant test cannot do.
+  practical_significance: >-
+    Whether an effect is big enough to change a decision, which is a question about
+    the domain and not one any p-value can answer.
+  sample_size: >-
+    How many observations a test used after dropping missing values, which is
+    often smaller than the number of rows in the table.
+
+  # --- assumptions (registry: FunctionSpec.assumptions) ------------------
+  normality: >-
+    The values (or the model's residuals) follow a roughly normal distribution;
+    violated, a t-test or ANOVA can report the wrong p-value in small samples.
+  normality_or_large_n: >-
+    Either the values are roughly normal, or there are enough of them that the
+    average behaves normally anyway -- the Central Limit Theorem doing the work.
+  normality_of_differences: >-
+    For a paired test, it is the within-pair differences that must be roughly
+    normal, not the two sets of measurements themselves.
+  normality_within_groups: >-
+    Each group is roughly normal on its own; a combined histogram can look normal
+    while both groups are skewed in opposite directions.
+  bivariate_normality: >-
+    The two variables are jointly normal, not merely normal one at a time; needed
+    for Pearson's confidence interval to mean what it says.
+  equal_variance: >-
+    The groups have similar spread; when they do not and the group sizes also
+    differ, Student's t-test reports a p-value that can be badly wrong.
+  homoscedasticity: >-
+    The spread of the residuals stays constant across the range of the predictor;
+    a fan shape in the residual plot means it does not.
+  independent: >-
+    Each observation carries its own information -- no repeated subjects, no
+    clusters, no time ordering; the assumption tests cannot check and users must vouch for.
+  exchangeability: >-
+    The labels could have been assigned in any order without changing the data's
+    distribution; what a permutation test needs in place of normality.
+  same_shape: >-
+    The groups have the same distributional shape, differing only in location;
+    needed to read a rank test as a difference in medians rather than a general tendency.
+  symmetry: >-
+    The distribution is balanced around its centre; what the Wilcoxon signed-rank
+    test needs to be about the median rather than something harder to name.
+  symmetry_of_differences: >-
+    The within-pair differences are symmetric around their centre; the paired
+    counterpart of `symmetry`.
+  sphericity: >-
+    In a repeated-measures design, every pair of conditions has the same variance
+    of differences; violated, the ANOVA's false-positive rate rises above alpha.
+  linearity: >-
+    The relationship is a straight line; Pearson's correlation measures only the
+    straight-line part and can read near zero for a strong curved relationship.
+  monotonicity: >-
+    The relationship goes consistently one way, even if not in a straight line;
+    what Spearman and Kendall measure.
+  balanced: >-
+    Every cell of the design has the same number of observations, which makes the
+    ANOVA's sums of squares unambiguous.
+  expected_counts: >-
+    Every cell of a contingency table has a large enough expected count -- Cochran's
+    rule -- for the chi-square approximation to hold.
+  np_at_least_10: >-
+    Both the expected number of successes and of failures are at least ten, which
+    is when a normal approximation to a proportion becomes trustworthy.
+  min_n_per_group>=2: >-
+    Every group has at least two observations, without which no within-group
+    variance can be estimated at all.
+  no_influential_outliers: >-
+    No single point is driving the result; an influential point changes the
+    conclusion when it is removed.
+  ordered_sequence: >-
+    The row order carries meaning (time, position), which some tests require and
+    most cross-sectional tests must not depend on.
+  paired: >-
+    Each observation in one group is matched to exactly one in the other, usually
+    the same subject measured twice.
+  paired_binary: >-
+    The same subject gives a yes/no answer under two conditions, so the table
+    counts changes rather than independent responses.
+  repeated: >-
+    The same subject is measured under three or more conditions, so the rows are
+    linked and cannot be treated as separate samples.
+  continuous: >-
+    The variable can take any value on a scale, so the distance between 1.1 and
+    1.2 is meaningful.
+  numeric: >-
+    The variable is a measured quantity rather than a label, so arithmetic on it
+    means something.
+  numeric_outcome: >-
+    The outcome being compared is a measured quantity, which is what a t-test or
+    ANOVA needs.
+  numeric_or_ordinal: >-
+    The variable is either measured or at least ordered, which is enough for a
+    rank-based method.
+  ordinal_or_higher: >-
+    The variable's values have an order, which is the minimum a rank method needs.
+  ordinal_exposure: >-
+    The grouping variable has ordered levels (low, medium, high), which is what
+    makes a test for trend meaningful rather than a test for any difference.
+  binary: >-
+    The variable takes exactly two values, such as yes/no or pass/fail.
+  binary_outcome: >-
+    The outcome being compared is a yes/no, so the question is about proportions
+    rather than means.
+  categorical: >-
+    The variable's values are labels, with no arithmetic meaning even when they
+    are stored as numbers.
+  categorical_outcome: >-
+    The outcome is a label rather than a quantity, so the question is about
+    how counts are distributed across categories.
+
+  # --- assumption checks (edacore.assumptions) ---------------------------
+  check_normality_shapiro: >-
+    The Shapiro-Wilk test for normality; powerful at small samples, and so
+    sensitive at large ones that it rejects deviations too small to matter.
+  check_normality_anderson: >-
+    The Anderson-Darling test for normality, which weights the tails more heavily
+    than Shapiro-Wilk and so notices heavy tails sooner.
+  check_normality_dagostino: >-
+    D'Agostino-Pearson's normality test, which combines skewness and kurtosis and
+    so says *how* the data departs from normal, not only that it does.
+  check_normality_lilliefors: >-
+    The Kolmogorov-Smirnov test for normality with the mean and variance estimated
+    from the data, which is the correction that makes it valid here.
+  check_normality_descriptive: >-
+    Skewness and kurtosis read directly, with no p-value; the check that does not
+    get more severe just because the sample got bigger.
+  qq_correlation: >-
+    How closely the sorted data tracks a straight line on a normal Q-Q plot,
+    reported as a correlation -- a graded reading of normality rather than a verdict.
+  check_equal_variance_levene: >-
+    Levene's test for equal spread across groups, using distances from each group's
+    mean; the general-purpose choice.
+  check_equal_variance_bartlett: >-
+    Bartlett's test for equal spread, which is more powerful than Levene's when the
+    data really is normal and misleading when it is not.
+  check_equal_variance_fligner: >-
+    The Fligner-Killeen test for equal spread, which uses ranks and so survives
+    non-normal data better than Bartlett's.
+  check_variance_ratio: >-
+    The ratio of the largest group variance to the smallest, read descriptively;
+    a rule of thumb that does not get stricter as the sample grows.
+  check_homoscedasticity_bp: >-
+    The Breusch-Pagan test for whether residual spread changes across the range of
+    the predictor.
+  check_same_shape: >-
+    A Kolmogorov-Smirnov comparison of the groups after centring and scaling them,
+    which asks whether they differ in shape and not merely in location.
+  check_symmetry: >-
+    Whether the distribution is balanced around its centre, which decides whether
+    a signed-rank test is about the median.
+  check_sphericity_mauchly: >-
+    Mauchly's test for sphericity in a repeated-measures design; when it fails, a
+    Greenhouse-Geisser or Huynh-Feldt correction is applied to the degrees of freedom.
+  check_expected_counts: >-
+    Whether every cell of a contingency table has a large enough expected count for
+    the chi-square approximation; when it does not, use Fisher's exact test.
+  check_expected_counts_gof: >-
+    The same expected-count rule for a goodness-of-fit table, where the expectation
+    comes from the reference proportions rather than from the margins.
+  check_proportion_counts: >-
+    Whether each group has at least ten expected successes and ten failures, which
+    a normal approximation to a proportion needs.
+  check_sample_size: >-
+    Whether each group has enough observations for the method at all, independently
+    of how the values are distributed.
+  check_balanced_design: >-
+    Whether every cell of the design has the same number of observations.
+  check_paired_structure: >-
+    Whether wide-format columns really are repeated measurements of the same
+    subjects, rather than unrelated columns placed side by side.
+  check_design_crossing: >-
+    Whether the same subject id appears in more than one group, which is how the
+    system notices that "independent groups" are really paired measurements.
+  check_independence_design: >-
+    A statement, not a test, that independence is a fact about how the data was
+    collected and only the user can confirm it.
+  check_measurement_level: >-
+    Whether a column's measurement scale (categorical, ordinal, numeric) is what the
+    chosen method requires.
+  check_linearity: >-
+    Whether the relationship between two variables is close enough to a straight
+    line for Pearson's correlation to describe it.
+  check_monotonicity: >-
+    Whether the relationship moves consistently in one direction, which is what
+    Spearman and Kendall measure.
+  check_influential_outliers: >-
+    Whether any single point has enough leverage to change the conclusion by itself,
+    measured with Cook's distance.
+  check_multicollinearity_vif: >-
+    How much each predictor is explained by the others (the variance inflation
+    factor); high values make individual coefficients unstable and hard to read.
+  check_autocorrelation_dw: >-
+    The Durbin-Watson test for whether consecutive residuals are correlated, which
+    would mean the observations are not independent.
+  check_ljung_box: >-
+    A test for autocorrelation across several lags at once, rather than just the
+    neighbouring one.
+
+  # --- one-sample and distribution tests ---------------------------------
+  one_sample_t: >-
+    Compares a sample's mean against a reference value, assuming the values are
+    roughly normal or the sample is large.
+  wilcoxon_one_sample: >-
+    Compares a sample's median against a reference value using signed ranks;
+    needs the distribution to be symmetric.
+  sign_test: >-
+    Compares a median against a reference value using only whether each value is
+    above or below it -- assumes almost nothing and detects little.
+  bootstrap_one_sample: >-
+    Estimates a statistic and its confidence interval by resampling the data, with
+    no assumption about the distribution's shape.
+  binomial_test: >-
+    Tests an observed proportion against a reference proportion exactly, with no
+    approximation, which is what makes it safe at small n.
+  chi2_goodness_of_fit: >-
+    Tests whether observed category counts match a set of reference proportions.
+  anderson_ksamp: >-
+    Tests whether several samples come from a common distribution, sensitive to
+    differences anywhere including the tails.
+  ks_two_sample: >-
+    Tests whether two samples come from the same distribution by comparing their
+    cumulative curves; sensitive to any difference, not only in location.
+  runs_test: >-
+    Tests whether an ordered sequence is in random order, by counting how often it
+    switches between above-average and below-average runs.
+
+  # --- two-group tests ---------------------------------------------------
+  student_t: >-
+    Compares two group means assuming both normality and equal spread; the equal
+    spread assumption is the one that usually fails.
+  welch_t: >-
+    Compares two group means without assuming equal spread; costs almost nothing
+    when the spreads are equal, which is why it is a good default.
+  yuen_trimmed_t: >-
+    Compares two trimmed means, so it keeps a mean-like interpretation while being
+    unmoved by skew and extreme values.
+  mann_whitney: >-
+    Tests whether one group tends to produce larger values than the other, using
+    ranks; only reads as a difference in medians when the two shapes match.
+  brunner_munzel: >-
+    Estimates the probability that a random value from one group exceeds one from
+    the other, without needing equal shapes or equal spread.
+  permutation_test_2s: >-
+    Compares two groups by shuffling the group labels thousands of times and
+    counting how often chance produces a difference this large.
+  bootstrap_diff: >-
+    Estimates the difference between two groups and its confidence interval by
+    resampling, giving an interval rather than a p-value.
+  paired_t: >-
+    Compares the mean of the within-pair differences against zero; assumes those
+    differences are roughly normal.
+  wilcoxon_signed_rank: >-
+    Compares paired measurements using the signed ranks of their differences;
+    assumes those differences are symmetric.
+  sign_test_paired: >-
+    Compares paired measurements using only the direction of each difference;
+    assumes nothing about their shape and detects little.
+  permutation_test_paired: >-
+    Compares paired measurements by randomly flipping the sign of each difference
+    thousands of times.
+  two_proportion_z: >-
+    Compares the proportion of successes between two independent groups using a
+    normal approximation.
+  tost_equivalence: >-
+    Two one-sided tests that together ask whether a difference is small enough to
+    call it equivalent; the test to use when "no difference" is the claim.
+
+  # --- k-group tests -----------------------------------------------------
+  one_way_anova: >-
+    Compares the means of three or more independent groups, assuming normality and
+    equal spread across all of them.
+  welch_anova: >-
+    Compares the means of three or more independent groups without assuming equal
+    spread; the safer default when group sizes differ.
+  alexander_govern: >-
+    Another comparison of three or more group means under unequal spread, which
+    tends to hold its false-positive rate better than Welch's at small n.
+  kruskal_wallis: >-
+    The rank-based comparison of three or more independent groups; a significant
+    result says some group tends to be larger, not which.
+  permutation_anova: >-
+    Compares three or more groups by shuffling group labels, with no distributional
+    assumption.
+  repeated_measures_anova: >-
+    Compares three or more conditions measured on the same subjects, assuming
+    sphericity; corrections are applied when that fails.
+  friedman: >-
+    The rank-based comparison of three or more conditions measured on the same
+    subjects.
+  cochran_q: >-
+    Compares the proportion of successes across three or more conditions measured
+    on the same subjects, for a yes/no outcome.
+  two_way_anova: >-
+    Compares means across two crossed factors at once and tests whether they
+    interact -- whether one factor's effect depends on the other.
+  aligned_rank_transform_anova: >-
+    A rank-based two-factor ANOVA that, unlike ranking naively, keeps main effects
+    and interactions separable.
+
+  # --- categorical and association tests ---------------------------------
+  chi2_independence: >-
+    Tests whether two categorical variables are associated, using how far the
+    observed counts sit from what independence would predict.
+  fisher_exact: >-
+    Tests association in a contingency table exactly, without the chi-square
+    approximation, which makes it the right choice when expected counts are small.
+  g_test: >-
+    A likelihood-ratio alternative to the chi-square test of independence, with
+    the same interpretation and slightly better behaviour in sparse tables.
+  mcnemar: >-
+    Tests whether a paired yes/no answer changed between two conditions, counting
+    only the subjects who switched.
+  cochran_armitage_trend: >-
+    Tests whether a proportion rises or falls steadily across ordered exposure
+    levels, rather than merely differing somewhere.
+  pearson: >-
+    Measures the strength of the straight-line relationship between two variables;
+    blind to curved relationships and sensitive to outliers.
+  spearman: >-
+    Pearson's correlation computed on ranks, so it measures any consistently
+    increasing or decreasing relationship and shrugs off outliers.
+  kendall_tau: >-
+    Measures association by counting how many pairs of observations agree in order;
+    more interpretable than Spearman and better behaved with many ties.
+  point_biserial: >-
+    The correlation between a binary and a continuous variable -- arithmetically
+    the same question as a two-sample t-test.
+  partial_correlation: >-
+    The correlation between two variables after removing what a third explains;
+    the tool for asking whether an association survives a confounder.
+  distance_correlation: >-
+    Detects any kind of dependence, linear or not; it is zero only when the two
+    variables are genuinely independent.
+  mutual_information: >-
+    How much knowing one variable reduces uncertainty about the other, in bits;
+    catches arbitrary dependence but has no natural scale for "strong".
+  correlation_matrix: >-
+    All pairwise correlations among several variables at once; remember that the
+    number of pairs grows fast and so does the multiple-testing problem.
+
+  # --- post-hoc procedures ------------------------------------------------
+  tukey_hsd: >-
+    All pairwise comparisons after a one-way ANOVA, corrected as a family so the
+    overall false-positive rate stays at alpha.
+  games_howell: >-
+    All pairwise comparisons after a k-group test when spreads are unequal -- the
+    Welch-style counterpart of Tukey's test.
+  dunn_test: >-
+    Pairwise rank comparisons after a significant Kruskal-Wallis, corrected within
+    the family of pairs.
+  nemenyi_friedman: >-
+    Pairwise comparisons after a significant Friedman test, using the studentized
+    range on mean ranks.
+  conover_friedman: >-
+    Pairwise comparisons after a significant Friedman test with more power than
+    Nemenyi's, at the cost of relying on the omnibus result being significant.
+  paired_posthoc: >-
+    Pairwise comparisons of repeated-measures conditions, corrected within the
+    family of pairs.
+  mcnemar_posthoc: >-
+    Pairwise McNemar comparisons after a significant Cochran's Q, corrected within
+    the family.
+  permutation_posthoc: >-
+    Pairwise permutation comparisons after a significant k-group test, corrected
+    within the family.
+
+  # --- effect sizes -------------------------------------------------------
+  cohens_d: >-
+    The difference between two means in standard-deviation units; roughly 0.2 is
+    small, 0.5 medium and 0.8 large, by convention rather than by law.
+  cohens_d_one_sample: >-
+    The distance of a sample mean from a reference value in standard-deviation units.
+  hedges_g: >-
+    Cohen's d with a correction for the bias that makes d too large in small
+    samples; prefer it below about n=20 per group.
+  hedges_g_av: >-
+    A version of Hedges' g standardised by the average of the two group variances,
+    for use when the spreads differ.
+  glass_delta: >-
+    A standardised mean difference scaled by the control group's spread only, for
+    when the treatment itself changes the variance.
+  d_z: >-
+    The standardised mean of the within-pair differences; not comparable with
+    Cohen's d from independent groups, because it depends on the pairing's strength.
+  rank_biserial: >-
+    The effect size for Mann-Whitney: the difference between the proportion of
+    pairs favouring each group, running from -1 to 1.
+  rank_biserial_one_sample: >-
+    The one-sample counterpart of the rank-biserial correlation, for a signed-rank test.
+  rank_biserial_paired: >-
+    The paired counterpart of the rank-biserial correlation, computed from the
+    signed ranks of the differences.
+  cliffs_delta: >-
+    How often a value from one group exceeds one from the other, minus how often
+    the reverse happens; a direct reading of "tends to be larger".
+  eta_squared: >-
+    The share of the outcome's total variation that the grouping explains; biased
+    upward in small samples.
+  partial_eta_squared: >-
+    The share of variation one factor explains after setting aside what the other
+    factors explain; the usual reporting choice in factorial designs.
+  omega_squared: >-
+    A less biased version of eta-squared; prefer it when samples are small.
+  epsilon_squared: >-
+    The rank-based counterpart of eta-squared, reported alongside Kruskal-Wallis.
+  kendalls_w: >-
+    How much the subjects agree in their ranking of the conditions, from 0 for no
+    agreement to 1 for complete agreement; the effect size for Friedman's test.
+  cohens_w: >-
+    The effect size for a chi-square test, measuring how far observed counts sit
+    from expected ones.
+  cohens_w_gof: >-
+    Cohen's w for a goodness-of-fit table, where the expectation comes from the
+    reference proportions.
+  cramers_v: >-
+    The strength of association in a contingency table, scaled to run from 0 to 1
+    whatever the table's size.
+  phi: >-
+    Cramer's V for a two-by-two table, equal to the correlation between the two
+    binary variables.
+  cohens_h: >-
+    The difference between two proportions after an arcsine transform, which keeps
+    the scale comparable near 0 and 1 where raw differences compress.
+  cohens_h_one_sample: >-
+    Cohen's h between an observed proportion and a reference proportion.
+  odds_ratio: >-
+    How much the odds of an outcome change between two groups; 1 means no
+    difference, and it is not the same as a risk ratio unless the outcome is rare.
+  risk_ratio: >-
+    How many times more likely the outcome is in one group than the other; easier
+    to read than an odds ratio, and only defined for a cohort-style comparison.
+  risk_difference: >-
+    The plain difference between two proportions, which is the number that says
+    how many extra cases per hundred people.
+  adjust_pvalues: >-
+    Corrects a set of p-values for the number of tests, by Holm, Bonferroni or a
+    false-discovery-rate method.
+  required_sample_size: >-
+    How many observations would be needed to detect an effect of a given size with
+    a given power; a question to ask before collecting data, not after.
+  minimum_detectable_effect: >-
+    The smallest effect the sample you already have could reliably detect; the
+    honest way to read a non-significant result.
+
+  # --- multiplicity methods ------------------------------------------------
+  bonferroni: >-
+    Multiplies every p-value by the number of tests; simple, always valid, and the
+    most conservative -- it will miss real effects to avoid false ones.
+  holm: >-
+    A step-down correction that is uniformly more powerful than Bonferroni while
+    controlling the same error rate; the sensible default.
+  fdr_bh: >-
+    The Benjamini-Hochberg procedure, which controls the share of your significant
+    findings that are false rather than the chance of any false finding at all.
+  fdr_by: >-
+    The Benjamini-Yekutieli variant of false-discovery-rate control, valid even
+    when the tests are correlated in unknown ways.
+  greenhouse_geisser: >-
+    A correction that shrinks a repeated-measures ANOVA's degrees of freedom when
+    sphericity fails; conservative.
+  huynh_feldt: >-
+    A less conservative sphericity correction than Greenhouse-Geisser, preferred
+    when the violation is mild.
+  cochran_rule: >-
+    The rule of thumb that a sample is large enough for the Central Limit Theorem
+    when n exceeds 25 times the squared skewness.
+  central_limit_theorem: >-
+    The result that averages become normally distributed as the sample grows, even
+    when the individual values are not -- how large samples rescue parametric tests.
+
+  # --- missingness (Section 6.3) -------------------------------------------
+  missing_data: >-
+    Values that are absent from the table; every test silently drops the rows it
+    cannot use, so the n a result reports is often smaller than the row count.
+  mcar: >-
+    Missing completely at random: whether a value is missing has nothing to do with
+    anything, observed or not -- the only case where dropping rows is safe.
+  mar: >-
+    Missing at random: whether a value is missing depends on other columns you do
+    have, so a model using those columns can impute it honestly.
+  mnar: >-
+    Missing not at random: whether a value is missing depends on the missing value
+    itself (high earners not reporting income); untestable from the data, so it is
+    a question for domain knowledge.
+  littles_test: >-
+    A test of whether missingness is completely at random across all columns at
+    once; failing it rules out MCAR, passing it does not prove MCAR.
+  missingness_pattern: >-
+    Which combinations of columns go missing together, which often points at the
+    mechanism that produced them.
+  missingness_predictors: >-
+    The observed columns that predict whether a value is missing; finding one is
+    evidence for MAR and names the variable an imputation must condition on.
+  listwise_deletion: >-
+    Dropping every row with any missing value; unbiased only under MCAR, and it can
+    discard most of the data when missingness is spread across many columns.
+  pairwise_deletion: >-
+    Using all available values for each calculation separately, which leaves
+    different statistics based on different subsets and can produce impossible results.
+  single_imputation: >-
+    Filling each missing value with one estimate; it understates uncertainty,
+    because the filled-in values are then treated as if they had been observed.
+  multiple_imputation: >-
+    Filling the gaps several times with different plausible values and pooling the
+    results, which is what carries the uncertainty through into the final interval.
+  mean_imputation: >-
+    Filling gaps with the column mean; it preserves the mean and shrinks the
+    variance and every correlation towards zero.
+  knn_imputation: >-
+    Filling a gap with values from the most similar complete rows.
+  mice: >-
+    Multivariate imputation by chained equations: imputing each column in turn from
+    the others, repeatedly, and pooling across several completed datasets.
+  missing_indicator: >-
+    An extra yes/no column recording that a value was missing, which keeps the fact
+    of missingness available to later analysis.
+
+  # --- data quality and profiling concepts -----------------------------------
+  sentinel_value: >-
+    A real number standing in for "missing", such as -999 or 0 for an unrecorded
+    income; averaged as data, it silently corrupts every summary.
+  duplicate_rows: >-
+    Identical rows appearing more than once, which count twice in every test and
+    make a result look more certain than it is.
+  target_leakage: >-
+    A column that is derived from the thing you are trying to predict or explain,
+    so it looks predictive for a reason that will not hold on new data.
+  semantic_type: >-
+    What a column means (continuous, ordinal, nominal, identifier, datetime, text)
+    as opposed to how it is stored; a Likert score stored as an integer is ordinal.
+  ordinal_as_numeric: >-
+    Treating an ordered rating as a measured quantity; it assumes the gap between
+    1 and 2 equals the gap between 4 and 5, which for a Likert scale is rarely true.
+  simpsons_paradox: >-
+    An association that reverses once you look within subgroups, which is why a
+    confounder worth stratifying by should be checked before a correlation is reported.
+  outlier: >-
+    A value far from the rest; whether to remove it depends on whether it is an
+    error or a genuine extreme, which is a domain question and not a statistical one.
+  influential_point: >-
+    An observation whose removal changes the conclusion, which is a stronger and
+    more useful notion than simply being extreme.
+  post_selection_inference: >-
+    Choosing what to test after looking at the data makes the resulting p-value
+    optimistic, because the choice itself used up some of the evidence.
+  data_version: >-
+    A snapshot of the dataset after an accepted change; every transform creates a
+    new one, so any earlier state can always be recovered.
+  provenance: >-
+    The record of what was run, why it was chosen and what it produced, which is
+    what makes an analysis reproducible rather than merely repeatable.
+
+# Friendly wordings mapped onto the terms above, so `explain("what is a
+# p-value?")` and `explain("p_value")` reach the same line. Aliases are a
+# lookup, not a parser: anything that is not here falls through to the
+# "not available offline" answer rather than being guessed at.
+aliases:
+  p value: p_value
+  pvalue: p_value
+  significance level: alpha
+  adjusted p: adjusted_p_value
+  corrected p: adjusted_p_value
+  ci: confidence_interval
+  confidence intervals: confidence_interval
+  power: statistical_power
+  false positive: type_i_error
+  false negative: type_ii_error
+  df: degrees_of_freedom
+  one sided: one_tailed
+  two sided: two_tailed
+  omnibus: omnibus_test
+  post hoc: post_hoc_test
+  posthoc: post_hoc_test
+  multiple comparisons: multiple_testing
+  multiplicity: multiple_testing
+  t test: student_t
+  t-test: student_t
+  welch: welch_t
+  welchs t test: welch_t
+  students t test: student_t
+  paired t test: paired_t
+  wilcoxon: wilcoxon_signed_rank
+  mann whitney: mann_whitney
+  mann-whitney: mann_whitney
+  mann whitney u: mann_whitney
+  wilcoxon rank sum: mann_whitney
+  anova: one_way_anova
+  kruskal wallis: kruskal_wallis
+  kruskal-wallis: kruskal_wallis
+  chi square: chi2_independence
+  chi-square: chi2_independence
+  chi2: chi2_independence
+  fishers exact test: fisher_exact
+  mcnemars test: mcnemar
+  tukey: tukey_hsd
+  dunn: dunn_test
+  correlation: pearson
+  pearson correlation: pearson
+  spearman correlation: spearman
+  kendall: kendall_tau
+  cohens d: cohens_d
+  effect sizes: effect_size
+  equal variances: equal_variance
+  homogeneity of variance: equal_variance
+  heteroscedasticity: homoscedasticity
+  independence: independent
+  shapiro: check_normality_shapiro
+  shapiro wilk: check_normality_shapiro
+  levene: check_equal_variance_levene
+  levenes test: check_equal_variance_levene
+  bartlett: check_equal_variance_bartlett
+  mauchly: check_sphericity_mauchly
+  mauchlys test: check_sphericity_mauchly
+  cooks distance: check_influential_outliers
+  vif: check_multicollinearity_vif
+  durbin watson: check_autocorrelation_dw
+  qq plot: qq_correlation
+  bonferroni correction: bonferroni
+  holm correction: holm
+  benjamini hochberg: fdr_bh
+  fdr: fdr_bh
+  false discovery rate: fdr_bh
+  clt: central_limit_theorem
+  cochrans rule: cochran_rule
+  missing completely at random: mcar
+  missing at random: mar
+  missing not at random: mnar
+  littles mcar test: littles_test
+  imputation: single_imputation
+  complete case analysis: listwise_deletion
+  sentinel: sentinel_value
+  duplicates: duplicate_rows
+  leakage: target_leakage
+  likert: ordinal_as_numeric
+  simpsons paradox: simpsons_paradox
+  outliers: outlier
+  equivalence: equivalence_testing
+  tost: tost_equivalence
+  bootstrapping: bootstrap
+  permutation: permutation_test

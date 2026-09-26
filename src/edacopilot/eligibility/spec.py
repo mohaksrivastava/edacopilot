@@ -139,6 +139,18 @@ def _id_column(spec: QuestionSpec, df: pd.DataFrame) -> tuple[str | None, bool]:
     return None, False
 
 
+def subject_column(spec: QuestionSpec, df: pd.DataFrame) -> str | None:
+    """The column identifying the subject, named or inferred.
+
+    Public because the orchestrator needs the same answer this module's
+    design cross-check used: a paired test on long-format data has to be
+    pivoted on the subject, and pivoting on a *different* column than the
+    one the ambiguity was raised about would silently pair the wrong rows.
+    """
+    column, _ = _id_column(spec, df)
+    return column
+
+
 def _design_ambiguities(spec: QuestionSpec, df: pd.DataFrame) -> list[str]:
     """Section 7.1 step 2: cross-check the proposed design against the ids.
 

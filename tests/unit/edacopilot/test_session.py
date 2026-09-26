@@ -34,6 +34,7 @@ from edacopilot.session import (
 )
 from edacore.contracts import Eligibility, PairwiseComparison, PostHocResult
 from edacore.stattests import k_independent, two_sample
+from tests.scenarios.generators import heteroscedastic_groups
 
 
 def _frame(seed: int = 1, n: int = 40) -> pd.DataFrame:
@@ -58,6 +59,17 @@ def _spec() -> QuestionSpec:
 @pytest.fixture
 def session(tmp_path: Path) -> Session:
     return Session.start(_frame(), session_id="test", root=tmp_path)
+
+
+@pytest.fixture
+def caveated_session(tmp_path: Path) -> Session:
+    """A session whose candidates are not all eligible.
+
+    The clean fixture above is deliberately unproblematic, so every method
+    comes back ELIGIBLE and Section 7.5's friction never engages. Unequal
+    variances give `student_t` a caveat to be overridden past.
+    """
+    return Session.start(heteroscedastic_groups(), session_id="caveat", root=tmp_path)
 
 
 # --------------------------------------------------------------------------
@@ -85,7 +97,7 @@ def test_a_new_version_gets_a_new_cache_and_cannot_inherit_stale_facts(
     that halves the data must not read a normality result computed about the
     data before it."""
     before = session.candidates(_spec())
-    session.accept(stage="quality", new_data=_frame(seed=2, n=15), label="resampled")
+    session.record_step(stage="quality", new_data=_frame(seed=2, n=15), label="resampled")
     after = session.candidates(_spec())
 
     assert after.dataset_version != before.dataset_version
@@ -113,7 +125,7 @@ def test_accepting_a_test_records_the_step_and_the_ledger_entry(session: Session
     verdict = session.propose(_spec())
     result = two_sample.welch_t(session.data, "group", "value")
 
-    step = session.accept(
+    step = session.record_step(
         stage="hypothesis",
         chosen=candidates.get("welch_t"),
         chosen_via="consensus",
@@ -141,7 +153,7 @@ def test_the_recorded_code_runs_and_reproduces_the_number(session: Session) -> N
     including the seed."""
     candidates = session.candidates(_spec())
     result = two_sample.welch_t(session.data, "group", "value")
-    step = session.accept(stage="hypothesis", chosen=candidates.get("welch_t"), result=result)
+    step = session.record_step(stage="hypothesis", chosen=candidates.get("welch_t"), result=result)
 
     assert step.code.startswith("edacore.")
     assert "ci=0.95" in step.code
@@ -153,38 +165,69 @@ def test_the_recorded_code_runs_and_reproduces_the_number(session: Session) -> N
 def test_accepting_a_transform_creates_a_version_linked_to_the_step(
     session: Session,
 ) -> None:
-    step = session.accept(stage="quality", new_data=session.data.head(20), label="first 20 rows")
+    step = session.record_step(
+        stage="quality", new_data=session.data.head(20), label="first 20 rows"
+    )
     assert step.output_version == "v1"
     assert session.version == "v1"
     assert session.store.record("v1").created_by_step == step.step_id
     assert len(session.data) == 20
 
 
-def test_an_override_needs_a_typed_reason(session: Session) -> None:
+def test_an_override_to_a_caveated_method_needs_a_typed_reason(caveated_session: Session) -> None:
     """Section 7.5: choosing a caveated or ineligible method requires a
     typed reason, stored in provenance and emitted on export."""
-    candidates = session.candidates(_spec())
-    with pytest.raises(ValueError, match="typed reason"):
-        session.accept(
-            stage="hypothesis",
-            chosen=candidates.candidates[0],
-            chosen_via="override",
-        )
+    candidates = caveated_session.candidates(_spec())
+    caveated = next(c for c in candidates.candidates if c.eligibility is not Eligibility.ELIGIBLE)
 
-    step = session.accept(
+    with pytest.raises(ValueError, match="typed reason"):
+        caveated_session.record_step(stage="hypothesis", chosen=caveated, chosen_via="override")
+
+    step = caveated_session.record_step(
         stage="hypothesis",
-        chosen=candidates.candidates[0],
+        chosen=caveated,
         chosen_via="override",
         override_reason="reviewers expect the textbook test",
     )
     assert step.is_override
-    assert session.provenance.overrides() == [step]
+    assert caveated_session.provenance.overrides() == [step]
+
+
+def test_the_reason_is_emitted_as_a_code_comment(caveated_session: Session) -> None:
+    """Section 7.5's last clause. The reason has to reach whoever reads the
+    exported notebook, at the line it applies to -- not only the log."""
+    candidates = caveated_session.candidates(_spec())
+    caveated = next(c for c in candidates.candidates if c.eligibility is not Eligibility.ELIGIBLE)
+    step = caveated_session.record_step(
+        stage="hypothesis",
+        chosen=caveated,
+        chosen_via="override",
+        override_reason="reviewers expect the textbook test",
+    )
+    assert step.code.startswith("# Override: reviewers expect the textbook test\n")
+    assert caveated.function in step.code.splitlines()[1]
+
+
+def test_choosing_an_eligible_method_needs_no_reason(session: Session) -> None:
+    """Section 7.5 puts friction on CAVEAT and INELIGIBLE, and only those.
+
+    The engine already ruled an ELIGIBLE method valid, so preferring one the
+    personas did not name is a choice among valid methods -- not an override
+    of a judgement, and not something to demand a justification for. Asking
+    for one anyway would train the user to type anything to get past it,
+    which would devalue the reason on the overrides that matter.
+    """
+    candidates = session.candidates(_spec())
+    eligible = next(c for c in candidates.candidates if c.eligibility is Eligibility.ELIGIBLE)
+    step = session.record_step(stage="hypothesis", chosen=eligible, chosen_via="override")
+    assert step.override_reason is None
+    assert not step.code.startswith("#")
 
 
 def test_the_provenance_log_is_append_only_across_an_undo(session: Session) -> None:
     """An undo moves the dataset head; it does not erase the fact that the
     step happened. "What did I do and then undo?" is a fair question."""
-    session.accept(stage="quality", new_data=session.data.head(30))
+    session.record_step(stage="quality", new_data=session.data.head(30))
     assert len(session.provenance) == 1
     session.undo()
     assert session.version == ROOT_VERSION
@@ -193,12 +236,12 @@ def test_the_provenance_log_is_append_only_across_an_undo(session: Session) -> N
 
 def test_the_session_renders_as_a_runnable_script(session: Session) -> None:
     candidates = session.candidates(_spec())
-    session.accept(
+    session.record_step(
         stage="hypothesis",
         chosen=candidates.get("welch_t"),
         result=two_sample.welch_t(session.data, "group", "value"),
     )
-    session.accept(
+    session.record_step(
         stage="hypothesis",
         chosen=candidates.get("mann_whitney"),
         result=two_sample.mann_whitney(session.data, "group", "value"),
@@ -245,7 +288,7 @@ def test_a_posthoc_accepted_through_the_session_does_not_count(session: Session)
     )
     three = Session.start(df, session_id="three", root=session.directory.parent)
     omnibus = k_independent.one_way_anova(df, "value", "group")
-    three.accept(stage="hypothesis", result=omnibus, family="value")
+    three.record_step(stage="hypothesis", result=omnibus, family="value")
 
     posthoc = PostHocResult(
         fact_id="tukey_hsd.value",
@@ -255,7 +298,7 @@ def test_a_posthoc_accepted_through_the_session_does_not_count(session: Session)
         comparisons=[PairwiseComparison(group_a="A", group_b="B", p_value=0.01, p_adjusted=0.03)],
         n={"total": 75},
     )
-    three.accept(stage="hypothesis", result=posthoc, family="value")
+    three.record_step(stage="hypothesis", result=posthoc, family="value")
 
     assert three.test_ledger.n_tests == 1
     assert len(three.test_ledger) == 2
@@ -271,7 +314,7 @@ def _busy_session(root: Path) -> Session:
     session = Session.start(_frame(), session_id="busy", root=root)
     candidates = session.candidates(_spec())
     verdict = session.propose(_spec())
-    session.accept(
+    session.record_step(
         stage="hypothesis",
         chosen=candidates.get("welch_t"),
         chosen_via="consensus",
@@ -281,8 +324,8 @@ def _busy_session(root: Path) -> Session:
         result=two_sample.welch_t(session.data, "group", "value"),
         family="value comparisons",
     )
-    session.accept(stage="quality", new_data=session.data.head(60), label="trimmed")
-    session.accept(
+    session.record_step(stage="quality", new_data=session.data.head(60), label="trimmed")
+    session.record_step(
         stage="hypothesis",
         chosen=candidates.get("mann_whitney"),
         chosen_via="override",
@@ -291,7 +334,7 @@ def _busy_session(root: Path) -> Session:
         family="value comparisons",
     )
     session.branch_from("alternative")
-    session.accept(stage="quality", new_data=session.data.head(40), label="trimmed further")
+    session.record_step(stage="quality", new_data=session.data.head(40), label="trimmed further")
     session.switch_branch("main")
     return session
 
@@ -361,7 +404,7 @@ def test_a_resumed_session_has_the_same_data_versions_and_ledger(tmp_path: Path)
     restored = resume("busy", root=tmp_path)
 
     assert restored.version == original.version
-    assert restored.branch == original.branch
+    assert restored.active_branch == original.active_branch
     assert restored.branches == original.branches
     assert restored.ledger() == original.ledger()
     assert restored.steps() == original.steps()
@@ -380,7 +423,7 @@ def test_a_resumed_session_can_be_continued(tmp_path: Path) -> None:
 
     restored = resume("busy", root=tmp_path)
     candidates = restored.candidates(_spec())
-    restored.accept(
+    restored.record_step(
         stage="hypothesis",
         chosen=candidates.get("yuen_trimmed_t"),
         result=two_sample.yuen_trimmed_t(restored.data, "group", "value"),
@@ -422,7 +465,7 @@ def test_sessions_can_be_listed(tmp_path: Path) -> None:
 def test_the_state_file_is_written_atomically(session: Session) -> None:
     """A kernel that dies mid-write should cost the last step, not the whole
     history."""
-    session.accept(stage="quality", new_data=session.data.head(10))
+    session.record_step(stage="quality", new_data=session.data.head(10))
     assert session.state_path.exists()
     assert not session.state_path.with_suffix(".json.tmp").exists()
 
@@ -449,14 +492,14 @@ def test_the_readme_carries_the_warning() -> None:
 
 def test_undo_branch_switch_round_trip_through_the_session(session: Session) -> None:
     original = session.data.copy()
-    session.accept(stage="quality", new_data=session.data.head(50))
-    session.accept(stage="quality", new_data=session.data.head(30))
+    session.record_step(stage="quality", new_data=session.data.head(50))
+    session.record_step(stage="quality", new_data=session.data.head(30))
     assert session.version == "v2"
 
     session.branch_from("side", version="v1")
-    assert session.branch == "side"
+    assert session.active_branch == "side"
     assert session.version == "v1"
-    session.accept(stage="quality", new_data=session.data.head(25))
+    session.record_step(stage="quality", new_data=session.data.head(25))
 
     session.switch_branch("main")
     assert session.version == "v2"
@@ -471,7 +514,7 @@ def test_undo_branch_switch_round_trip_through_the_session(session: Session) -> 
 
 def test_only_v0_and_the_head_are_in_memory_after_a_long_session(session: Session) -> None:
     for size in (60, 50, 40, 30):
-        session.accept(stage="quality", new_data=session.data.head(size))
+        session.record_step(stage="quality", new_data=session.data.head(size))
     assert session.store.in_memory() == {ROOT_VERSION, session.version}
 
 
