@@ -107,8 +107,8 @@ terms:
     Testing whether a difference is small enough to ignore; the only way to
     support "these are the same", which an ordinary non-significant test cannot do.
   practical_significance: >-
-    Whether an effect is big enough to change a decision, which is a question about
-    the domain and not one any p-value can answer.
+    Whether an effect is large enough to matter in context, separate from whether it
+    is statistically significant.
   sample_size: >-
     How many observations a test used after dropping missing values, which is
     often smaller than the number of rows in the table.
@@ -139,8 +139,8 @@ terms:
     Each observation carries its own information -- no repeated subjects, no
     clusters, no time ordering; the assumption tests cannot check and users must vouch for.
   exchangeability: >-
-    The labels could have been assigned in any order without changing the data's
-    distribution; what a permutation test needs in place of normality.
+    If the null hypothesis is true, shuffling the group labels would not change the
+    data's distribution; permutation tests rely on this.
   same_shape: >-
     The groups have the same distributional shape, differing only in location;
     needed to read a rank test as a difference in medians rather than a general tendency.
@@ -460,17 +460,16 @@ terms:
     Pairwise comparisons after a significant Friedman test, using the studentized
     range on mean ranks.
   conover_friedman: >-
-    Pairwise comparisons after a significant Friedman test with more power than
-    Nemenyi's, at the cost of relying on the omnibus result being significant.
+    Pairwise comparisons between conditions, usually run only after a significant
+    Friedman test.
   paired_posthoc: >-
-    Pairwise comparisons of repeated-measures conditions, corrected within the
-    family of pairs.
+    Pairwise paired t-tests between repeated-measures conditions, with p-values
+    adjusted by Holm.
   mcnemar_posthoc: >-
-    Pairwise McNemar comparisons after a significant Cochran's Q, corrected within
-    the family.
+    Pairwise McNemar tests after Cochran's Q, with p-values adjusted by Holm.
   permutation_posthoc: >-
-    Pairwise permutation comparisons after a significant k-group test, corrected
-    within the family.
+    Pairwise permutation tests after a significant k-group test, with p-values
+    adjusted by Holm.
 
   # --- effect sizes -------------------------------------------------------
   cohens_d: >-
@@ -505,14 +504,20 @@ terms:
     The share of the outcome's total variation that the grouping explains; biased
     upward in small samples.
   partial_eta_squared: >-
-    The share of variation one factor explains after setting aside what the other
-    factors explain; the usual reporting choice in factorial designs.
+    Proportion of variance explained by one effect after removing variance explained
+    by the model's other effects; equals eta-squared in a one-way design.
   omega_squared: >-
-    A less biased version of eta-squared; prefer it when samples are small.
+    Estimated proportion of variance in the population explained by the groups;
+    less biased than eta-squared, especially in small samples.
+  epsilon_squared: >-
+    An ambiguous name for two different measures: in ANOVA it is Kelley's, a less
+    biased estimate of variance explained than eta-squared; after Kruskal-Wallis it
+    is the rank version. This project computes only the rank version, and labels it
+    `rank_epsilon_squared` so a result card cannot be read as the other one.
   rank_epsilon_squared: >-
-    The share of the outcome's rank variation the grouping explains, reported
-    alongside Kruskal-Wallis; not the same quantity as Kelley's epsilon-squared,
-    which is computed from an ANOVA.
+    The share of rank variance explained by the grouping, H/(n-1), reported
+    alongside Kruskal-Wallis; not Kelley's epsilon-squared, which is an ANOVA
+    measure.
   kendalls_w: >-
     How much the subjects agree in their ranking of the conditions, from 0 for no
     agreement to 1 for complete agreement; the effect size for Friedman's test.
@@ -529,8 +534,8 @@ terms:
     Cramer's V for a two-by-two table, equal to the correlation between the two
     binary variables.
   cohens_h: >-
-    The difference between two proportions after an arcsine transform, which keeps
-    the scale comparable near 0 and 1 where raw differences compress.
+    Difference between two proportions on a transformed scale where equal gaps are
+    equally detectable; about 0.2 is small, 0.5 medium and 0.8 large.
   cohens_h_one_sample: >-
     Cohen's h between an observed proportion and a reference proportion.
   odds_ratio: >-
@@ -650,15 +655,15 @@ terms:
   influential_point: >-
     An observation whose removal changes the conclusion, which is a stronger and
     more useful notion than simply being extreme.
-  post_selection_inference: >-
-    Choosing what to test after looking at the data makes the resulting p-value
-    optimistic, because the choice itself used up some of the evidence.
+  data_driven_comparison: >-
+    Choosing what to test after looking at the data, which makes p-values look
+    stronger than they are.
   data_version: >-
-    A snapshot of the dataset after an accepted change; every transform creates a
-    new one, so any earlier state can always be recovered.
+    An edacopilot term, not a statistical one: a snapshot of the data after an
+    accepted change, kept so any earlier state can be recovered.
   provenance: >-
-    The record of what was run, why it was chosen and what it produced, which is
-    what makes an analysis reproducible rather than merely repeatable.
+    An edacopilot term, not a statistical one: the record of what was run, why it
+    was chosen and what it produced.
 
 # Friendly wordings mapped onto the terms above, so `explain("what is a
 # p-value?")` and `explain("p_value")` reach the same line. Aliases are a
@@ -680,6 +685,8 @@ aliases:
   two sided: two_tailed
   omnibus: omnibus_test
   post hoc: post_hoc_test
+  post selection: data_driven_comparison
+  post selection inference: data_driven_comparison
   posthoc: post_hoc_test
   multiple comparisons: multiple_testing
   multiplicity: multiple_testing
@@ -729,8 +736,8 @@ aliases:
   holm correction: holm
   benjamini hochberg: fdr_bh
   fdr: fdr_bh
-  epsilon squared: rank_epsilon_squared
-  epsilon_squared: rank_epsilon_squared
+  epsilon squared: epsilon_squared
+  rank epsilon squared: rank_epsilon_squared
   false discovery rate: fdr_bh
   clt: central_limit_theorem
   cochrans rule: cochran_rule

@@ -140,3 +140,81 @@ def test_definitions_name_the_consequence_where_there_is_one() -> None:
     }
     for term, expected in consequences.items():
         assert expected in TERMS[term].lower(), f"'{term}' does not say what goes wrong"
+
+
+# --------------------------------------------------------------------------
+# Definitions supplied by the maintainer (m7.1)
+#
+# These were reviewed and handed over as wording, not as an instruction to
+# paraphrase. Pinned by their substance rather than character-for-character,
+# so a later copy-edit is allowed but a change of meaning is not.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("term", "must_contain"),
+    [
+        ("omega_squared", ["population", "less biased", "small samples"]),
+        ("exchangeability", ["null hypothesis", "shuffling", "permutation"]),
+        ("partial_eta_squared", ["after removing", "one-way"]),
+        ("conover_friedman", ["Pairwise", "significant Friedman"]),
+        ("cohens_h", ["equally detectable", "0.2", "0.5", "0.8"]),
+        ("practical_significance", ["matter in context", "separate from"]),
+        ("data_driven_comparison", ["after looking at the data", "stronger than they are"]),
+        ("provenance", ["edacopilot term, not a statistical one"]),
+        ("data_version", ["edacopilot term, not a statistical one"]),
+        ("paired_posthoc", ["paired t-test", "Holm"]),
+        ("mcnemar_posthoc", ["McNemar", "Cochran's Q", "Holm"]),
+        ("permutation_posthoc", ["permutation", "Holm"]),
+        ("rank_epsilon_squared", ["rank variance", "H/(n-1)", "Kruskal-Wallis"]),
+        ("epsilon_squared", ["ambiguous", "Kelley", "rank version"]),
+    ],
+)
+def test_the_maintainers_definitions_are_the_ones_in_use(
+    term: str, must_contain: list[str]
+) -> None:
+    assert term in TERMS, f"'{term}' was defined in review but is not in the glossary"
+    definition = TERMS[term]
+    missing = [phrase for phrase in must_contain if phrase not in definition]
+    assert not missing, f"'{term}' no longer says {missing}: {definition!r}"
+
+
+def test_post_selection_inference_was_renamed_not_dropped() -> None:
+    """Renamed to `data_driven_comparison` in review. The old phrasing is
+    what a reader would type, so it still has to resolve."""
+    assert "post_selection_inference" not in TERMS
+    assert answer_free_question("post selection") == TERMS["data_driven_comparison"]
+    assert answer_free_question("post-selection inference") == TERMS["data_driven_comparison"]
+
+
+def test_the_two_epsilon_squareds_are_told_apart() -> None:
+    """The finding behind the rename: one name, two measures in the
+    literature, and only the rank one implemented here."""
+    assert TERMS["epsilon_squared"] != TERMS["rank_epsilon_squared"]
+    # The bare name reaches the disambiguation, not the rank measure.
+    assert answer_free_question("epsilon squared") == TERMS["epsilon_squared"]
+    assert answer_free_question("rank epsilon squared") == TERMS["rank_epsilon_squared"]
+
+
+def test_only_the_rank_measure_is_registered_and_reported() -> None:
+    """The other half of the finding, asserted against the code rather than
+    the glossary: nothing computes Kelley's epsilon-squared, so no result
+    can be labelled with the ambiguous name."""
+    import numpy as np
+    import pandas as pd
+
+    from edacore.stattests import k_independent
+
+    registered = {spec.name for spec in registry.list()}
+    assert "rank_epsilon_squared" in registered
+    assert "epsilon_squared" not in registered
+
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(
+        {
+            "v": np.concatenate([rng.normal(0, 1, 20), rng.normal(1, 1, 20), rng.normal(2, 1, 20)]),
+            "g": ["a"] * 20 + ["b"] * 20 + ["c"] * 20,
+        }
+    )
+    result = k_independent.kruskal_wallis(df, "v", "g")
+    assert result.effect_size_name == "rank_epsilon_squared"

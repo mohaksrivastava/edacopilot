@@ -1806,7 +1806,23 @@ Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
 
 ### 2026-09-26 — M7.1 (tag `m7.1`)
-Three checks against M7, two of which found something.
+Three checks against M7, two of which found something, plus a round of
+reviewed glossary wording.
+
+- **Fourteen glossary entries replaced with the maintainer's own wording**,
+  after review of the terms flagged as uncertain in M7's report. Most were
+  clarity fixes; two were substantive. `partial_eta_squared` now says what
+  it is (variance explained by one effect after removing the others, equal
+  to eta-squared in a one-way design) rather than asserting a reporting
+  convention. `post_selection_inference` is renamed
+  `data_driven_comparison` — the old name described the field, not the
+  thing the user did — with the old phrasing kept as an alias, since it is
+  what a reader would type. `provenance` and `data_version` are now
+  labelled as edacopilot vocabulary rather than statistics, and the three
+  `*_posthoc` wrappers say what they run and how they adjust instead of
+  gesturing at "corrected within the family". The wording is pinned by
+  substance in `test_glossary.py`, so a copy-edit is allowed and a change
+  of meaning is not.
 
 - **`epsilon_squared` was one name doing one job under a name that means
   another.** The question was whether it served as both the ANOVA measure
@@ -1820,10 +1836,12 @@ Three checks against M7, two of which found something.
   ANOVA measure as the ANOVA measure, which is the class of misreading
   this project exists to prevent, so the function, the reported
   `effect_size_name` and the magnitude-threshold key are all now
-  `rank_epsilon_squared`. One glossary entry, saying plainly that it is not
-  Kelley's; the bare name is an alias pointing at it, since that is what a
-  user will type. No split was needed because there is only one measure —
-  had there been two, they would have needed two entries and two labels.
+  `rank_epsilon_squared`. The glossary carries **both** names: the bare one
+  explains that it is ambiguous and says which measure this project
+  computes, and `rank_epsilon_squared` defines the one it actually reports.
+  No split of the *implementation* was needed because there is only one
+  measure — but the name needed splitting, which is the same problem one
+  step earlier.
 - **The post-hoc pairings were already the specified ones**, and now each
   has a test. The pairing is statistical, not stylistic: Tukey's
   studentized range assumes the equal variance that Welch's ANOVA and
