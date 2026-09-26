@@ -166,8 +166,8 @@ terms:
     Every cell of a contingency table has a large enough expected count -- Cochran's
     rule -- for the chi-square approximation to hold.
   np_at_least_10: >-
-    Both the expected number of successes and of failures are at least ten, which
-    is when a normal approximation to a proportion becomes trustworthy.
+    Each group has at least ten successes and ten failures, which is when a normal
+    approximation to a proportion becomes trustworthy.
   min_n_per_group>=2: >-
     Every group has at least two observations, without which no within-group
     variance can be estimated at all.
@@ -436,11 +436,12 @@ terms:
     The correlation between two variables after removing what a third explains;
     the tool for asking whether an association survives a confounder.
   distance_correlation: >-
-    Detects any kind of dependence, linear or not; it is zero only when the two
-    variables are genuinely independent.
+    Detects any kind of dependence, linear or not, and is zero only under genuine
+    independence; the sample estimate is biased upward, so read a small value with
+    its permutation p-value rather than on its own.
   mutual_information: >-
-    How much knowing one variable reduces uncertainty about the other, in bits;
-    catches arbitrary dependence but has no natural scale for "strong".
+    How much knowing one variable reduces uncertainty about the other, reported in
+    nats; catches arbitrary dependence but has no natural scale for "strong".
   correlation_matrix: >-
     All pairwise correlations among several variables at once; remember that the
     number of pairs grows fast and so does the multiple-testing problem.
