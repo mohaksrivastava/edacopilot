@@ -790,6 +790,33 @@ Deterministic interpretation guards attached to every `TestResult`. Each is a fu
 | `imputed_data` | outcome contains imputed values | "{k}% of values are imputed; single imputation understates uncertainty." |
 | `outliers_removed` | rows removed in outlier stage affect this variable | "{k} outliers were removed earlier; results may differ with them included." |
 
+Implemented in `edacore/validity_notes.py` (M6.1). Four guards are decided
+from the `TestResult` alone; the other five are about the *session* — how
+many tests have run, what the same-shape check said, whether the outcome
+was imputed, whether rows were dropped, whether this comparison was chosen
+after looking. `edacore` has no session and must not grow one (Section 3.1:
+it is usable on its own as a plain statistics library), so the caller
+assembles a `ValidityContext` and passes it in; the HYPOTHESIS stage builds
+one, and a bare `attach(result)` still yields the four result-only guards.
+
+Notes **append**. Several `edacore` tests already use
+`TestResult.validity_notes` for facts with nowhere else to go (Mauchly's
+test and the Huynh-Feldt correction on a repeated-measures ANOVA, the run
+count on a runs test); `attach` adds after those and skips duplicates, so
+it is idempotent.
+
+Two conventions Section 6.12 left open, decided with the maintainer:
+
+- **"n small"** for `large_effect_small_n` means the *smallest group* has
+  fewer than 30 observations, not the total. The note's claim is that the
+  CI is wide, and CI width is driven by the smallest cell: a 200-vs-12
+  comparison is preliminary whatever its total says.
+- **`mann_whitney_shape` also covers `kruskal_wallis`**, which declares the
+  same `same_distribution_shape` assumption. The misreading it prevents —
+  reporting a rank test as a difference in medians — is identical there,
+  and `check_same_shape` already handles k > 2 groups with Holm adjustment
+  across the pairs.
+
 ---
 
 ## 7. Eligibility engine (deterministic)
@@ -1632,6 +1659,39 @@ Build strictly in this order. Each milestone ends with its acceptance criteria p
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-26 — M6.1 (tag `m6.1`)
+Three fixes ahead of M7, each closing a gap M6 left that M7 would have
+built on.
+
+- **Serialisation audit (Section 12.4).** Five fields across both packages
+  are unordered collections; M6 fixed the two it happened to trip over
+  (`Candidate.tags`, `QuestionSpec.confirmed_by_user`). The other three —
+  `FunctionSpec.tags`, `EquivalenceRule.functions`,
+  `PersonaPolicy.method_pool_tags` — now sort on dump too. Fixing the
+  instances is not the same as fixing the class of bug, so
+  `test_canonical_serialisation.py` walks every pydantic model in both
+  packages and fails on any set-typed field without a sorting serializer:
+  a new model cannot slip through and resurface months later as an
+  intermittent resume failure. Only sets needed this. `dict` preserves
+  insertion order, and every dict on these models is built by iterating a
+  list (a family's methods, `PERSONA_ORDER`, the dataset's columns, the
+  store's versions in creation order), so its order is already a function
+  of the value that built it.
+- **`paired_as_independent` ordering confirmed, and shown.** The design
+  ambiguity does reach the user before any persona card, by construction
+  rather than by convention (see the M7 entry). `docs/persona_picks.md`
+  already showed the state *after* confirmation; it now renders the
+  question that comes first, from the live engine, above the table — a
+  table that showed only the answer would read as though the system had
+  decided the design itself, which is the one thing Section 7.1 forbids.
+- **Validity notes (Section 6.12) did not exist.** `validity_notes.py` was
+  in Section 4.2's layout and in no milestone's deliverables, so all nine
+  guards were missing and M7's result cards would have shipped without
+  them. Implemented with a test per guard for the case it fires on *and*
+  the case it must stay silent on — a guard that fires on everything
+  teaches nothing, and one that never fires is decoration. The two
+  conventions Section 6.12 left open are recorded there.
 
 ### 2026-09-25 — M6 (tag `m6`)
 The session layer (Section 12), in `edacopilot/session/`: the dataset version

@@ -46,6 +46,13 @@ class Scenario:
     note: str
     df: pd.DataFrame
     spec: QuestionSpec
+    # The spec as it arrives *before* the user has confirmed anything. When
+    # set, its ambiguities are rendered above the picks, because the picks
+    # below them are the state after those questions were answered -- and a
+    # table that showed only the answer would read as though the system had
+    # decided the design itself (Section 7.1: "Design is always confirmed by
+    # the user").
+    asked_first: QuestionSpec | None = None
 
 
 def _compare(
@@ -98,10 +105,16 @@ def scenarios() -> list[Scenario]:
             _compare(heavy_tails_small_n(), "value", "group", Design.INDEPENDENT),
         ),
         Scenario(
-            "paired_as_independent (design confirmed paired)",
-            "the trap resolved: the user confirmed the repeated-measures design (Section 15.3)",
+            "paired_as_independent (after the design question is answered)",
+            "the trap resolved: the user confirmed the paired design (Section 15.3)",
             paired,
             _compare(paired, "score", "condition", Design.PAIRED, subject="subject_id"),
+            asked_first=QuestionSpec(
+                goal=Goal.COMPARE_GROUPS,
+                variables={"outcome": "score", "group": "condition"},
+                design=Design.INDEPENDENT,
+                user_text="Is the score different between the two conditions?",
+            ),
         ),
         Scenario(
             "ordinal_as_numeric (confirmed ordinal)",
@@ -156,6 +169,21 @@ def render() -> str:
     for scenario in scenarios():
         validated = validate_spec(scenario.spec, scenario.df)
         lines += [f"### {scenario.name}", "", f"> {scenario.note}", ""]
+
+        if scenario.asked_first is not None:
+            asked = validate_spec(scenario.asked_first, scenario.df)
+            lines += [
+                "**This table is the state *after* the user answered.** The question "
+                "below is raised first, and no persona is consulted until it is: "
+                "`select_candidates` refuses a spec with open ambiguities "
+                "(`AmbiguousSpecError`), and a persona can only ever choose from a "
+                "`CandidateSet`, so there is no path to the card underneath without "
+                "passing through the question.",
+                "",
+                *(f"> {question}" for question in asked.ambiguities),
+                "",
+            ]
+
         if validated.ambiguities:
             lines += [
                 "The engine stops here and asks before any persona is consulted:",

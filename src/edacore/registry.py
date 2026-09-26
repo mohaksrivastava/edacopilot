@@ -13,7 +13,7 @@ import inspect
 from collections.abc import Callable, Collection, Iterable
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_serializer
 
 from edacore.codegen import render_call
 
@@ -57,6 +57,19 @@ class FunctionSpec(BaseModel):
     read_only: bool = True
     takes_df: bool = True
     func: Callable[..., Any] = Field(exclude=True)
+
+    @field_serializer("tags")
+    def _sorted_tags(self, tags: set[str]) -> list[str]:
+        """Serialise tags in a fixed order.
+
+        A `set` dumps in CPython's hash-table iteration order, which is not
+        a function of the set's value -- see `Candidate.tags` in
+        `edacore.contracts` for the full account. A `FunctionSpec` reaches
+        JSON through `docs/eligibility_table.md` and the registry dumps the
+        LLM layer will send as tool metadata, both of which must be stable
+        across processes.
+        """
+        return sorted(tags)
 
 
 class Registry:

@@ -79,9 +79,13 @@ Family: `two_independent_numeric`. Card: **divergence**.
 | **Consultant** | `mann_whitney` | `eligible` | Use Mann-Whitney. |
 | **Maverick** | `yuen_trimmed_t` | `eligible` | Yuen's trimmed-mean t-test is worth a look here; it assumes less than the standard choice; though independence depends on how the data was collected, not just its values. |
 
-### paired_as_independent (design confirmed paired)
+### paired_as_independent (after the design question is answered)
 
-> the trap resolved: the user confirmed the repeated-measures design (Section 15.3)
+> the trap resolved: the user confirmed the paired design (Section 15.3)
+
+**This table is the state *after* the user answered.** The question below is raised first, and no persona is consulted until it is: `select_candidates` refuses a spec with open ambiguities (`AmbiguousSpecError`), and a persona can only ever choose from a `CandidateSet`, so there is no path to the card underneath without passing through the question.
+
+> 30 value(s) of 'subject_id' (which looks like a subject id, though the question did not name it) appear in more than one 'condition' group, so the same subject seems to be measured more than once. The question was read as comparing independent groups. Are these paired measurements on the same subjects, or does 'subject_id' mean something else here?
 
 Family: `two_paired_numeric`. Card: **consensus**.
 

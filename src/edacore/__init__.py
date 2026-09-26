@@ -12,5 +12,6 @@ from edacore import multiplicity as multiplicity
 from edacore import power as power
 from edacore import profiling as profiling
 from edacore import stattests as stattests
+from edacore import validity_notes as validity_notes
 
 __version__ = "0.1.0"

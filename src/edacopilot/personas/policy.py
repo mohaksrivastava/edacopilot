@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 PERSONA_DIR = Path(__file__).parent
 
@@ -109,6 +109,14 @@ class EquivalenceRule(BaseModel):
     def applies_to(self, functions: set[str]) -> bool:
         return len(functions) > 1 and functions <= self.functions
 
+    @field_serializer("functions")
+    def _sorted_functions(self, functions: frozenset[str]) -> list[str]:
+        """Serialise in a fixed order -- see `Candidate.tags` in
+        `edacore.contracts` for why a set's dump order is not a function of
+        its value. A rule that fires ends up quoted in a card and in the
+        provenance of the step it collapsed."""
+        return sorted(functions)
+
 
 class MultipleTestingPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -143,6 +151,13 @@ class PersonaPolicy(BaseModel):
     outliers: dict[str, Any] = Field(default_factory=dict)
     transforms: dict[str, Any] = Field(default_factory=dict)
     constraints: dict[str, Any] = Field(default_factory=dict)
+
+    @field_serializer("method_pool_tags")
+    def _sorted_method_pool_tags(self, tags: set[str]) -> list[str]:
+        """Serialise in a fixed order -- see `Candidate.tags` in
+        `edacore.contracts`. A persona's policy is dumped into card
+        provenance and into `docs/persona_picks.md`."""
+        return sorted(tags)
 
     @field_validator("prefer")
     @classmethod
