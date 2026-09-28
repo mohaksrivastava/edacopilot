@@ -62,7 +62,7 @@ from edacore.contracts import (
 from edacore.registry import registry
 
 from .cards import ActionButton, Card, ProposalView, Suggestion
-from .diagnostic_plots import illustrate
+from .diagnostic_plots import illustrate, plot_for_check
 from .intents import Intent, IntentType, button
 from .state_machine import Stage, jump_warning, next_stage, parse_stage
 
@@ -230,6 +230,9 @@ class Orchestrator:
             ),
             IntentType.SKIP: self.skip,
             IntentType.SHOW: lambda: self._show(intent),
+            IntentType.SHOW_DIAGNOSTIC_PLOT: lambda: self.show_diagnostic_plot(
+                str(intent.payload.get("fact_id", ""))
+            ),
             IntentType.SETTINGS: lambda: self._settings(intent),
             IntentType.EXPORT: lambda: self.goto_stage(Stage.EXPORT.value),
         }
@@ -1016,6 +1019,47 @@ class Orchestrator:
             diagnostics=relevant,
         )
 
+    # ---- on-demand diagnostic plots (m8.1) ----------------------------------
+
+    def show_diagnostic_plot(self, fact_id: str) -> Card:
+        """Render the plot for a check that passed and so was never drawn.
+
+        Only reachable from a "Show plot" button on the proposal still on
+        screen (Section 1.3's "hide noise" keeps PASSes out of the card by
+        default); if the proposal has moved on, there is nothing stale to
+        show, so this says so rather than guessing at an old check.
+        """
+        pending = self.state.pending
+        stale = Card(
+            kind="info",
+            title="That diagnostic is no longer on screen",
+            stage=self.state.stage.value,
+            body_md="Ask a new question to see its checks and plots again.",
+        )
+        if pending is None:
+            return stale
+        check = next((c for c in pending.candidates.checks if c.fact_id == fact_id), None)
+        if check is None or check.status is not CheckStatus.PASS:
+            return stale
+        plot = plot_for_check(check, pending.spec)
+        if plot is None:
+            return Card(
+                kind="info",
+                title=f"No plot for {check.assumption}",
+                stage=self.state.stage.value,
+                body_md="This check has nothing to draw.",
+            )
+        function, params = plot
+        ref = self._render_plot(function, params)
+        return Card(
+            kind="info",
+            title=f"Plot: {check.assumption} ({check.method})",
+            stage=self.state.stage.value,
+            body_md=f"**{check.status.value.upper()}** — {check.consequence}",
+            diagnostics=[check.model_copy(update={"plot_ref": ref})],
+            plots=[ref],
+        )
+
     # ---- navigation ---------------------------------------------------------
 
     def goto_stage(self, name: str) -> Card:
@@ -1292,6 +1336,26 @@ class Orchestrator:
             self._render_plot,
             plot_all=bool(self.session.config.get("plot_all_diagnostics")),
         )
+
+        # A PASSing check gets no plot inline (Section 1.3: hide noise), but
+        # its picture is a click away if one exists to draw (m8.1) -- a
+        # button, not an eager render, so a card full of PASSes costs
+        # nothing until someone actually wants to look. UNTESTABLE/N-A
+        # checks are excluded even when a builder matches their assumption
+        # name: there is no computed check behind them, so a plot would
+        # show data without the evidence to back what it's illustrating.
+        for check in diagnostics:
+            if check.status is not CheckStatus.PASS:
+                continue
+            if plot_for_check(check, pending.spec) is None:
+                continue
+            actions.append(
+                ActionButton(
+                    label=f"Show plot: {check.assumption}",
+                    intent=button(IntentType.SHOW_DIAGNOSTIC_PLOT, fact_id=check.fact_id),
+                    call=f'session.show_diagnostic_plot("{check.fact_id}")',
+                )
+            )
 
         return Card(
             kind="consensus" if consensus else "divergence",

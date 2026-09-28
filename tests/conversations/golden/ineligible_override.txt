@@ -58,6 +58,7 @@ EDACOPILOT:
       [Run spearman]   (session.accept())
       [Use something else (e.g. kendall_tau)]   (session.override("kendall_tau"))
       [Why this method?]   (session.explain("spearman"))
+      [Show plot: monotonicity]   (session.show_diagnostic_plot("monotonicity.satisfaction.tenure_months"))
 
 --------------------------------------------------------------------------
 

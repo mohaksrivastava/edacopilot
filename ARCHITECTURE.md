@@ -776,7 +776,11 @@ Raw text is **never** sent to the LLM. All analysis is deterministic.
 ### 6.11 Visualisation (`viz.py`)
 All return a `matplotlib.figure.Figure` and a `plot_ref` ID stored in the session. Code template must reproduce the plot.
 
-`histogram`, `kde`, `ecdf`, `boxplot`, `violin`, `strip_by_group`, `qq_plot`, `scatter_lowess`, `pair_plot(cols, max_cols=6)`, `correlation_heatmap`, `bar_counts`, `mosaic`, `missing_matrix`, `missing_heatmap`, `missing_by_group`, `outlier_plot`, `before_after(col, record)`, `ts_line(col, time, entity=None)`, `stl_plot`, `acf_plot`, `pacf_plot`, `change_point_plot`, `text_length_hist`, `top_terms_bar`, `effect_size_forest(results)`.
+`histogram`, `kde`, `ecdf`, `boxplot`, `violin`, `strip_by_group`, `qq_plot`, `scatter_lowess`, `pair_plot(cols, max_cols=6)`, `correlation_heatmap`, `bar_counts`, `mosaic`, `missing_matrix`, `missing_heatmap`, `missing_by_group`, `outlier_plot(df, col, flagged=None, whis=1.5)`†, `before_after(before, after, col, record=None)`†, `ts_line(col, time, entity=None)`, `stl_plot`, `acf_plot`, `pacf_plot`, `change_point_plot(df, col, change_points, time=None)`†, `text_length_hist`, `top_terms_bar`, `effect_size_forest(results)`.
+
+† Signature departs from a plain name because of the "Three signatures take
+what a later milestone will detect" point below — kept here rather than
+just in the prose so the catalogue line matches `viz.py` exactly.
 
 All 25 implemented in M8. Four points settled there:
 
@@ -1879,6 +1883,48 @@ whenever Section 6 grows.
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-28 — M8.1 (tag `m8.1`)
+Four loose ends in the M8 deliverable, closed before M9 starts.
+
+- **`examples/m8_demo.ipynb`**, new (there was no `examples/` directory
+  before this). Walks Section 7.4's worked example end to end through the
+  Python API: the seeded income/gender dataset, the divergence card, an
+  override with a typed reason on a `CAVEAT` candidate, an undo, and —
+  since Section 7.4's dataset has only two groups — a second three-group
+  dataset to show a significant omnibus offering, and waiting for
+  acceptance of, its paired post-hoc. `tests/test_examples_notebook.py`
+  executes it top to bottom via `nbclient` on every run; it needed no new
+  CI step, because it is an ordinary test under `tests/` and the existing
+  `pytest -m "not llm and not slow"` step already collects it.
+- **The empty-reason-disables-Accept test already existed.**
+  `tests/unit/edacopilot/test_ui.py::test_accept_is_disabled_until_a_reason_is_typed`
+  (plus a whitespace-only variant and the `INELIGIBLE` double-confirmation
+  case) was written with M8. Checked, not re-added.
+- **A "Show plot" button for a `PASS` check that has one to draw.**
+  Section 1.3's "hide noise" still keeps a passing check's plot out of the
+  card by default, but `plot_for_check` was already a pure function of the
+  check and the question (`orchestrator/diagnostic_plots.py`) — it simply
+  was never called for anything but `FAIL`/`BORDERLINE`. The card now adds
+  a button per plottable `PASS` check (`IntentType.SHOW_DIAGNOSTIC_PLOT`,
+  carrying the check's `fact_id`); the click reaches
+  `Orchestrator.show_diagnostic_plot`, which draws on demand through the
+  same `plot_ref` cache the eager path uses, so repeats reuse the PNG. The
+  button is withheld from `UNTESTABLE`/`NOT_APPLICABLE` checks even when an
+  assumption name matches a plot builder — there is no computed check
+  behind those, so a plot would show data without the evidence it claims
+  to illustrate. `Session.show_diagnostic_plot(fact_id)` is the matching
+  API method, following the one-`Session`-method-per-action convention.
+  This changed five golden transcripts' button lists (new buttons only,
+  same underlying behaviour) — regenerated with
+  `scripts/generate_transcripts.py`.
+- **Section 6.11's three signature departures are now in the catalogue
+  line itself**, not only in the prose bullet below it: `outlier_plot(df,
+  col, flagged=None, whis=1.5)`, `change_point_plot(df, col,
+  change_points, time=None)`, and `before_after(before, after, col,
+  record=None)`, each marked `†` back to the existing explanation. No
+  implementation changed — `viz.py` already matched this; only the
+  catalogue line was stale against it.
 
 ### 2026-09-26 — M8 (tag `m8`)
 The Jupyter UI (Section 13) and the visualisation catalogue (Section 6.11),

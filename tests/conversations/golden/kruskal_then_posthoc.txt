@@ -78,6 +78,7 @@ EDACOPILOT:
       [Maverick: permutation_anova]   (session.accept("maverick"))
       [Use something else (e.g. welch_anova)]   (session.override("welch_anova"))
       [Why this method?]   (session.explain("kruskal_wallis"))
+      [Show plot: same_distribution_shape]   (session.show_diagnostic_plot("same_shape.wait_minutes.clinic"))
 
 --------------------------------------------------------------------------
 

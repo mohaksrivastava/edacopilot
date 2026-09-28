@@ -125,6 +125,9 @@ EDACOPILOT:
       [Maverick: yuen_trimmed_t]   (session.accept("maverick"))
       [Use something else (e.g. bootstrap_diff)]   (session.override("bootstrap_diff"))
       [Why this method?]   (session.explain("mann_whitney"))
+      [Show plot: same_distribution_shape]   (session.show_diagnostic_plot("same_shape.income.region"))
+      [Show plot: adequate_n]   (session.show_diagnostic_plot("sample_size.income.region"))
+      [Show plot: equal_variance]   (session.show_diagnostic_plot("variance.levene.income.region"))
 
 --------------------------------------------------------------------------
 

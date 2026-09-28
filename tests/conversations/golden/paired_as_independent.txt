@@ -81,6 +81,10 @@ EDACOPILOT:
       [Run paired_t]   (session.accept())
       [Use something else (e.g. permutation_test_paired)]   (session.override("permutation_test_paired"))
       [Why this method?]   (session.explain("paired_t"))
+      [Show plot: normality]   (session.show_diagnostic_plot("normality.descriptive.score.condition=after"))
+      [Show plot: normality]   (session.show_diagnostic_plot("normality.descriptive.score.condition=before"))
+      [Show plot: normality]   (session.show_diagnostic_plot("normality.shapiro.score.condition=after"))
+      [Show plot: normality]   (session.show_diagnostic_plot("normality.shapiro.score.condition=before"))
 
 --------------------------------------------------------------------------
 

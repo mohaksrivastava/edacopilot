@@ -327,6 +327,10 @@ class Session:
         """Explain a term, or why a method is or is not eligible here."""
         return self.orchestrator.explain(topic)
 
+    def show_diagnostic_plot(self, fact_id: str) -> Card:
+        """Render the plot for a passing check the card didn't draw (m8.1)."""
+        return self.orchestrator.show_diagnostic_plot(fact_id)
+
     def goto_stage(self, name: str) -> Card:
         """Jump to a stage, with Section 9.2's warning if it skips one."""
         return self.orchestrator.goto_stage(name)

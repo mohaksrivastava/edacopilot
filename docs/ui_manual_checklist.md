@@ -80,6 +80,7 @@ differs between hosts or that only a human can judge.
 | 15 | With the notebook rendered in greyscale (or with a colour filter), PASS / BORDERLINE / FAIL are still distinguishable | Colour-only signalling would be invisible to ~1 man in 12 |
 | 16 | After 20+ cards, scrolling the card area stays responsive | `max_height` + `overflow` behave differently per host |
 | 17 | Restarting the kernel and running `eda.resume("<session_id>")` restores stage and visited tabs | Section 12.4 through the UI |
+| 18 | Clicking "Show plot" on a passing check appends a small card with that plot, right below the proposal it came from | m8.1: on-demand rendering follows the same click-appends-a-card model as every other action, so nothing about the panel's behaviour is special-cased for it |
 
 ## Known limitations in this build
 

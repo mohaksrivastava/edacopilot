@@ -35,6 +35,7 @@ class IntentType(StrEnum):
     BRANCH = "branch"
     SWITCH_BRANCH = "switch_branch"
     SHOW = "show"
+    SHOW_DIAGNOSTIC_PLOT = "show_diagnostic_plot"
     SKIP = "skip"
     EXPORT = "export"
     SETTINGS = "settings"
