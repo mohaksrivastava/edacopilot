@@ -1,0 +1,215 @@
+{"id": 1, "text": "is income different between gender groups?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 2, "text": "does age differ by region?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 3, "text": "compare wait_minutes across clinic", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 4, "text": "how does satisfaction vary with treatment_group?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 5, "text": "check whether test_score depends on department", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 6, "text": "is weight different between cohort groups?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 7, "text": "is there a relationship between income and age?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 8, "text": "does age correlate with wait_minutes?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 9, "text": "how are wait_minutes and satisfaction related?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 10, "text": "is there a relationship between satisfaction and test_score?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 11, "text": "does test_score correlate with weight?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 12, "text": "how are weight and reaction_time related?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 13, "text": "is there a relationship between reaction_time and income?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 14, "text": "does income correlate with age?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 15, "text": "how are age and wait_minutes related?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 16, "text": "is there a relationship between wait_minutes and satisfaction?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 17, "text": "does satisfaction correlate with test_score?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 18, "text": "how are test_score and weight related?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 19, "text": "is there a relationship between weight and reaction_time?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 20, "text": "does reaction_time correlate with income?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 21, "text": "how are income and age related?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 22, "text": "has income changed over month?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 23, "text": "is there a trend in age across quarter?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 24, "text": "has wait_minutes changed over week?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 25, "text": "is there a trend in satisfaction across month?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 26, "text": "has test_score changed over quarter?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 27, "text": "is there a trend in weight across week?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 28, "text": "has reaction_time changed over month?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 29, "text": "is there a trend in income across quarter?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 30, "text": "has age changed over week?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 31, "text": "is there a trend in wait_minutes across month?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 32, "text": "is income higher in one clinic than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 33, "text": "is age higher in one treatment_group than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 34, "text": "is wait_minutes higher in one department than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 35, "text": "is satisfaction higher in one cohort than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 36, "text": "is test_score higher in one gender than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 37, "text": "is weight higher in one region than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 38, "text": "is reaction_time higher in one clinic than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 39, "text": "is income higher in one treatment_group than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 40, "text": "is age higher in one department than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 41, "text": "is wait_minutes higher in one cohort than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 42, "text": "is satisfaction higher in one gender than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 43, "text": "is test_score higher in one region than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 44, "text": "is weight higher in one clinic than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 45, "text": "is reaction_time higher in one treatment_group than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 46, "text": "is income higher in one department than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 47, "text": "is age higher in one cohort than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 48, "text": "is wait_minutes higher in one gender than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 49, "text": "is satisfaction higher in one region than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 50, "text": "is test_score higher in one clinic than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 51, "text": "is weight higher in one treatment_group than another?", "context": {}, "label": {"type": "ask_analysis"}}
+{"id": 52, "text": "yes", "context": {}, "label": {"type": "accept", "persona": null}}
+{"id": 53, "text": "sounds good", "context": {}, "label": {"type": "accept", "persona": null}}
+{"id": 54, "text": "run it", "context": {}, "label": {"type": "accept", "persona": null}}
+{"id": 55, "text": "accept", "context": {}, "label": {"type": "accept", "persona": null}}
+{"id": 56, "text": "go with that", "context": {}, "label": {"type": "accept", "persona": null}}
+{"id": 57, "text": "that works", "context": {}, "label": {"type": "accept", "persona": null}}
+{"id": 58, "text": "do it", "context": {}, "label": {"type": "accept", "persona": null}}
+{"id": 59, "text": "go with professor", "context": {}, "label": {"type": "accept", "persona": "professor"}}
+{"id": 60, "text": "use professor's proposal", "context": {}, "label": {"type": "accept", "persona": "professor"}}
+{"id": 61, "text": "I'll take the professor option", "context": {}, "label": {"type": "accept", "persona": "professor"}}
+{"id": 62, "text": "professor sounds right", "context": {}, "label": {"type": "accept", "persona": "professor"}}
+{"id": 63, "text": "go with consultant", "context": {}, "label": {"type": "accept", "persona": "consultant"}}
+{"id": 64, "text": "use consultant's proposal", "context": {}, "label": {"type": "accept", "persona": "consultant"}}
+{"id": 65, "text": "I'll take the consultant option", "context": {}, "label": {"type": "accept", "persona": "consultant"}}
+{"id": 66, "text": "consultant sounds right", "context": {}, "label": {"type": "accept", "persona": "consultant"}}
+{"id": 67, "text": "go with maverick", "context": {}, "label": {"type": "accept", "persona": "maverick"}}
+{"id": 68, "text": "use maverick's proposal", "context": {}, "label": {"type": "accept", "persona": "maverick"}}
+{"id": 69, "text": "I'll take the maverick option", "context": {}, "label": {"type": "accept", "persona": "maverick"}}
+{"id": 70, "text": "maverick sounds right", "context": {}, "label": {"type": "accept", "persona": "maverick"}}
+{"id": 71, "text": "set alpha to 0.01", "context": {}, "label": {"type": "modify", "alpha": 0.01}}
+{"id": 72, "text": "use alpha = 0.01", "context": {}, "label": {"type": "modify", "alpha": 0.01}}
+{"id": 73, "text": "set alpha to 0.1", "context": {}, "label": {"type": "modify", "alpha": 0.1}}
+{"id": 74, "text": "use alpha = 0.1", "context": {}, "label": {"type": "modify", "alpha": 0.1}}
+{"id": 75, "text": "set alpha to 0.001", "context": {}, "label": {"type": "modify", "alpha": 0.001}}
+{"id": 76, "text": "use alpha = 0.001", "context": {}, "label": {"type": "modify", "alpha": 0.001}}
+{"id": 77, "text": "set alpha to 0.005", "context": {}, "label": {"type": "modify", "alpha": 0.005}}
+{"id": 78, "text": "use alpha = 0.005", "context": {}, "label": {"type": "modify", "alpha": 0.005}}
+{"id": 79, "text": "set alpha to 0.02", "context": {}, "label": {"type": "modify", "alpha": 0.02}}
+{"id": 80, "text": "use alpha = 0.02", "context": {}, "label": {"type": "modify", "alpha": 0.02}}
+{"id": 81, "text": "override to welch_t", "context": {}, "label": {"type": "override", "function": "welch_t"}}
+{"id": 82, "text": "use welch_t anyway", "context": {}, "label": {"type": "override", "function": "welch_t"}}
+{"id": 83, "text": "override to mann_whitney", "context": {}, "label": {"type": "override", "function": "mann_whitney"}}
+{"id": 84, "text": "use mann_whitney anyway", "context": {}, "label": {"type": "override", "function": "mann_whitney"}}
+{"id": 85, "text": "override to student_t", "context": {}, "label": {"type": "override", "function": "student_t"}}
+{"id": 86, "text": "use student_t anyway", "context": {}, "label": {"type": "override", "function": "student_t"}}
+{"id": 87, "text": "override to kruskal_wallis", "context": {}, "label": {"type": "override", "function": "kruskal_wallis"}}
+{"id": 88, "text": "use kruskal_wallis anyway", "context": {}, "label": {"type": "override", "function": "kruskal_wallis"}}
+{"id": 89, "text": "override to spearman", "context": {}, "label": {"type": "override", "function": "spearman"}}
+{"id": 90, "text": "use spearman anyway", "context": {}, "label": {"type": "override", "function": "spearman"}}
+{"id": 91, "text": "override to kendall_tau", "context": {}, "label": {"type": "override", "function": "kendall_tau"}}
+{"id": 92, "text": "use kendall_tau anyway", "context": {}, "label": {"type": "override", "function": "kendall_tau"}}
+{"id": 93, "text": "I still want to use welch_t", "context": {}, "label": {"type": "override", "function": "welch_t"}}
+{"id": 94, "text": "what is a p-value?", "context": {}, "label": {"type": "explain", "topic": "a p-value"}}
+{"id": 95, "text": "explain a p-value", "context": {}, "label": {"type": "explain", "topic": "a p-value"}}
+{"id": 96, "text": "what is Cohen's d?", "context": {}, "label": {"type": "explain", "topic": "Cohen's d"}}
+{"id": 97, "text": "explain Cohen's d", "context": {}, "label": {"type": "explain", "topic": "Cohen's d"}}
+{"id": 98, "text": "what is a confidence interval?", "context": {}, "label": {"type": "explain", "topic": "a confidence interval"}}
+{"id": 99, "text": "explain a confidence interval", "context": {}, "label": {"type": "explain", "topic": "a confidence interval"}}
+{"id": 100, "text": "what is Levene's test?", "context": {}, "label": {"type": "explain", "topic": "Levene's test"}}
+{"id": 101, "text": "explain Levene's test", "context": {}, "label": {"type": "explain", "topic": "Levene's test"}}
+{"id": 102, "text": "what is the Shapiro-Wilk test?", "context": {}, "label": {"type": "explain", "topic": "the Shapiro-Wilk test"}}
+{"id": 103, "text": "explain the Shapiro-Wilk test", "context": {}, "label": {"type": "explain", "topic": "the Shapiro-Wilk test"}}
+{"id": 104, "text": "what is effect size?", "context": {}, "label": {"type": "explain", "topic": "effect size"}}
+{"id": 105, "text": "explain effect size", "context": {}, "label": {"type": "explain", "topic": "effect size"}}
+{"id": 106, "text": "what is a type I error?", "context": {}, "label": {"type": "explain", "topic": "a type I error"}}
+{"id": 107, "text": "explain a type I error", "context": {}, "label": {"type": "explain", "topic": "a type I error"}}
+{"id": 108, "text": "why not welch_t?", "context": {}, "label": {"type": "explain", "topic": "welch_t"}}
+{"id": 109, "text": "why not mann_whitney?", "context": {}, "label": {"type": "explain", "topic": "mann_whitney"}}
+{"id": 110, "text": "why not student_t?", "context": {}, "label": {"type": "explain", "topic": "student_t"}}
+{"id": 111, "text": "why not kruskal_wallis?", "context": {}, "label": {"type": "explain", "topic": "kruskal_wallis"}}
+{"id": 112, "text": "why not spearman?", "context": {}, "label": {"type": "explain", "topic": "spearman"}}
+{"id": 113, "text": "why not kendall_tau?", "context": {}, "label": {"type": "explain", "topic": "kendall_tau"}}
+{"id": 114, "text": "go to the profile stage", "context": {}, "label": {"type": "goto_stage", "target_stage": "profile"}}
+{"id": 115, "text": "go to the missingness stage", "context": {}, "label": {"type": "goto_stage", "target_stage": "missingness"}}
+{"id": 116, "text": "go to the outliers stage", "context": {}, "label": {"type": "goto_stage", "target_stage": "outliers"}}
+{"id": 117, "text": "go to the explore stage", "context": {}, "label": {"type": "goto_stage", "target_stage": "explore"}}
+{"id": 118, "text": "go to the hypothesis stage", "context": {}, "label": {"type": "goto_stage", "target_stage": "hypothesis"}}
+{"id": 119, "text": "go to the export stage", "context": {}, "label": {"type": "goto_stage", "target_stage": "export"}}
+{"id": 120, "text": "jump to profile", "context": {}, "label": {"type": "goto_stage", "target_stage": "profile"}}
+{"id": 121, "text": "jump to missingness", "context": {}, "label": {"type": "goto_stage", "target_stage": "missingness"}}
+{"id": 122, "text": "jump to outliers", "context": {}, "label": {"type": "goto_stage", "target_stage": "outliers"}}
+{"id": 123, "text": "jump to explore", "context": {}, "label": {"type": "goto_stage", "target_stage": "explore"}}
+{"id": 124, "text": "undo", "context": {}, "label": {"type": "undo"}}
+{"id": 125, "text": "go back", "context": {}, "label": {"type": "undo"}}
+{"id": 126, "text": "revert that", "context": {}, "label": {"type": "undo"}}
+{"id": 127, "text": "undo the last step", "context": {}, "label": {"type": "undo"}}
+{"id": 128, "text": "take that back", "context": {}, "label": {"type": "undo"}}
+{"id": 129, "text": "go back one step", "context": {}, "label": {"type": "undo"}}
+{"id": 130, "text": "undo please", "context": {}, "label": {"type": "undo"}}
+{"id": 131, "text": "can you revert", "context": {}, "label": {"type": "undo"}}
+{"id": 132, "text": "create a branch called alt-cleaning", "context": {}, "label": {"type": "branch", "name": "alt-cleaning"}}
+{"id": 133, "text": "branch alt-cleaning", "context": {}, "label": {"type": "branch", "name": "alt-cleaning"}}
+{"id": 134, "text": "create a branch called kept-outliers", "context": {}, "label": {"type": "branch", "name": "kept-outliers"}}
+{"id": 135, "text": "branch kept-outliers", "context": {}, "label": {"type": "branch", "name": "kept-outliers"}}
+{"id": 136, "text": "create a branch called sensitivity-check", "context": {}, "label": {"type": "branch", "name": "sensitivity-check"}}
+{"id": 137, "text": "branch sensitivity-check", "context": {}, "label": {"type": "branch", "name": "sensitivity-check"}}
+{"id": 138, "text": "create a branch called reviewer-request", "context": {}, "label": {"type": "branch", "name": "reviewer-request"}}
+{"id": 139, "text": "branch reviewer-request", "context": {}, "label": {"type": "branch", "name": "reviewer-request"}}
+{"id": 140, "text": "switch to branch alt-cleaning", "context": {}, "label": {"type": "switch_branch", "name": "alt-cleaning"}}
+{"id": 141, "text": "switch to the \"alt-cleaning\" branch", "context": {}, "label": {"type": "switch_branch", "name": "alt-cleaning"}}
+{"id": 142, "text": "switch to branch kept-outliers", "context": {}, "label": {"type": "switch_branch", "name": "kept-outliers"}}
+{"id": 143, "text": "switch to the \"kept-outliers\" branch", "context": {}, "label": {"type": "switch_branch", "name": "kept-outliers"}}
+{"id": 144, "text": "switch to branch sensitivity-check", "context": {}, "label": {"type": "switch_branch", "name": "sensitivity-check"}}
+{"id": 145, "text": "switch to the \"sensitivity-check\" branch", "context": {}, "label": {"type": "switch_branch", "name": "sensitivity-check"}}
+{"id": 146, "text": "switch to branch reviewer-request", "context": {}, "label": {"type": "switch_branch", "name": "reviewer-request"}}
+{"id": 147, "text": "switch to the \"reviewer-request\" branch", "context": {}, "label": {"type": "switch_branch", "name": "reviewer-request"}}
+{"id": 148, "text": "skip this", "context": {}, "label": {"type": "skip"}}
+{"id": 149, "text": "not now", "context": {}, "label": {"type": "skip"}}
+{"id": 150, "text": "move on", "context": {}, "label": {"type": "skip"}}
+{"id": 151, "text": "skip", "context": {}, "label": {"type": "skip"}}
+{"id": 152, "text": "let's move on", "context": {}, "label": {"type": "skip"}}
+{"id": 153, "text": "not right now", "context": {}, "label": {"type": "skip"}}
+{"id": 154, "text": "pass on this", "context": {}, "label": {"type": "skip"}}
+{"id": 155, "text": "skip ahead", "context": {}, "label": {"type": "skip"}}
+{"id": 156, "text": "export this to a notebook", "context": {}, "label": {"type": "export"}}
+{"id": 157, "text": "write it up", "context": {}, "label": {"type": "export"}}
+{"id": 158, "text": "export the notebook", "context": {}, "label": {"type": "export"}}
+{"id": 159, "text": "can you export this", "context": {}, "label": {"type": "export"}}
+{"id": 160, "text": "write this up as code", "context": {}, "label": {"type": "export"}}
+{"id": 161, "text": "generate the notebook", "context": {}, "label": {"type": "export"}}
+{"id": 162, "text": "export", "context": {}, "label": {"type": "export"}}
+{"id": 163, "text": "write up the analysis", "context": {}, "label": {"type": "export"}}
+{"id": 164, "text": "show me the ledger", "context": {}, "label": {"type": "settings"}}
+{"id": 165, "text": "what have I run so far", "context": {}, "label": {"type": "settings"}}
+{"id": 166, "text": "show history", "context": {}, "label": {"type": "settings"}}
+{"id": 167, "text": "what have I done", "context": {}, "label": {"type": "settings"}}
+{"id": 168, "text": "show me what tests ran", "context": {}, "label": {"type": "settings"}}
+{"id": 169, "text": "ledger", "context": {}, "label": {"type": "settings"}}
+{"id": 170, "text": "what's my test history", "context": {}, "label": {"type": "settings"}}
+{"id": 171, "text": "show the ledger", "context": {}, "label": {"type": "settings"}}
+{"id": 172, "text": "plot income against satisfaction", "context": {}, "label": {"type": "show"}}
+{"id": 173, "text": "plot age against test_score", "context": {}, "label": {"type": "show"}}
+{"id": 174, "text": "plot wait_minutes against weight", "context": {}, "label": {"type": "show"}}
+{"id": 175, "text": "plot satisfaction against reaction_time", "context": {}, "label": {"type": "show"}}
+{"id": 176, "text": "plot test_score against income", "context": {}, "label": {"type": "show"}}
+{"id": 177, "text": "plot weight against age", "context": {}, "label": {"type": "show"}}
+{"id": 178, "text": "plot reaction_time against wait_minutes", "context": {}, "label": {"type": "show"}}
+{"id": 179, "text": "show me the distribution of income", "context": {}, "label": {"type": "show"}}
+{"id": 180, "text": "show me the distribution of age", "context": {}, "label": {"type": "show"}}
+{"id": 181, "text": "show me the distribution of wait_minutes", "context": {}, "label": {"type": "show"}}
+{"id": 182, "text": "show me the distribution of satisfaction", "context": {}, "label": {"type": "show"}}
+{"id": 183, "text": "show me the distribution of test_score", "context": {}, "label": {"type": "show"}}
+{"id": 184, "text": "show me the distribution of weight", "context": {}, "label": {"type": "show"}}
+{"id": 185, "text": "show me the distribution of reaction_time", "context": {}, "label": {"type": "show"}}
+{"id": 186, "text": "yes", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "confirmed": true}}
+{"id": 187, "text": "yeah", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "confirmed": true}}
+{"id": 188, "text": "correct", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "confirmed": true}}
+{"id": 189, "text": "that's right", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "confirmed": true}}
+{"id": 190, "text": "no", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "confirmed": false}}
+{"id": 191, "text": "nope", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "confirmed": false}}
+{"id": 192, "text": "that's wrong", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "confirmed": false}}
+{"id": 193, "text": "not quite", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "confirmed": false}}
+{"id": 194, "text": "paired", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "design": "paired"}}
+{"id": 195, "text": "independent", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "design": "independent"}}
+{"id": 196, "text": "repeated", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "design": "repeated"}}
+{"id": 197, "text": "same people", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "design": "paired"}}
+{"id": 198, "text": "matched", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "design": "paired"}}
+{"id": 199, "text": "different people", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "design": "independent"}}
+{"id": 200, "text": "same subjects", "context": {"awaiting_answer": true}, "label": {"type": "answer_clarification", "design": "paired"}}
+{"id": 201, "text": "hmm", "context": {}, "label": {"type": "other"}}
+{"id": 202, "text": "I don't know", "context": {}, "label": {"type": "other"}}
+{"id": 203, "text": "what about it", "context": {}, "label": {"type": "other"}}
+{"id": 204, "text": "ok", "context": {}, "label": {"type": "other"}}
+{"id": 205, "text": "?", "context": {}, "label": {"type": "other"}}
+{"id": 206, "text": "tell me more", "context": {}, "label": {"type": "other"}}
+{"id": 207, "text": "interesting", "context": {}, "label": {"type": "other"}}
+{"id": 208, "text": "hm not sure", "context": {}, "label": {"type": "other"}}
+{"id": 209, "text": "maybe", "context": {}, "label": {"type": "other"}}
+{"id": 210, "text": "I guess", "context": {}, "label": {"type": "other"}}
+{"id": 211, "text": "sure whatever", "context": {}, "label": {"type": "other"}}
+{"id": 212, "text": "huh", "context": {}, "label": {"type": "other"}}
+{"id": 213, "text": "well", "context": {}, "label": {"type": "other"}}
+{"id": 214, "text": "right", "context": {}, "label": {"type": "other"}}
+{"id": 215, "text": "I see", "context": {}, "label": {"type": "other"}}
