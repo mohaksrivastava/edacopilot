@@ -87,9 +87,12 @@ def _render_realistic_item(item: dict[str, Any]) -> str:
         lines.append(f"**Context:** `{item['context']}`")
     label = dict(item["label"])
     note = label.pop("note", None)
+    expected_correction = label.pop("expected_correction", None)
     needs_clarification = label.pop("needs_clarification", False)
     lines.append(f"**Label:** `{label}`")
     lines.append(f"**Needs clarification:** {'yes' if needs_clarification else 'no'}")
+    if expected_correction:
+        lines.append(f"**Expected correction note:** {expected_correction}")
     if note:
         lines.append(f"**Note:** {note}")
     return "\n".join(lines)

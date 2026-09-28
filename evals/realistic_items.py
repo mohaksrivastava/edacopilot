@@ -701,16 +701,25 @@ REALISTIC_INTENT_ITEMS: list[Item] = [
 # --------------------------------------------------------------------------
 
 REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
-    # A. Near-miss / nonexistent column names -- never silently guessed
+    # A. Near-miss / nonexistent column names. Resolved with
+    # `edacopilot.eligibility.column_matching.match_column` against this
+    # eval's own column universe (NUMERIC + GROUPS, `build_eval_sets.py`)
+    # at the default thresholds (M9.2's decision: deterministic fuzzy
+    # matching, never an LLM guess). An unambiguous typo is corrected,
+    # with an `expected_correction` note that must appear on the card; a
+    # name with no plausible column at all stays needs_clarification=True
+    # (validate_spec would raise InvalidSpecError for these, not ask an
+    # ambiguity -- there's nothing plausible to offer as a button either).
     (
         "is icnome different by gender",
         {
             "goal": "compare_groups",
-            "variables": {},
+            "variables": {"outcome": "income", "group": "gender"},
             "design": "unknown",
             "needs_clarification": True,
-            "note": "'icnome' is a typo of 'income'; whether to silently correct common typos or ask is an "
-            "open product decision -- the safe label here is to ask, not guess",
+            "expected_correction": "Using `income` (you wrote 'icnome')",
+            "note": "'icnome' resolves unambiguously to 'income' (match_column, default thresholds); "
+            "needs_clarification stays True for a different reason now -- design is still unstated",
         },
         {},
     ),
@@ -721,7 +730,8 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
             "variables": {},
             "design": "unknown",
             "needs_clarification": True,
-            "note": "'revenue' is not a column in this dataset; must not be silently mapped to 'income'",
+            "note": "'revenue' matches nothing in the column universe above the floor threshold; "
+            "validate_spec raises InvalidSpecError here, not an ambiguity -- nothing plausible to offer",
         },
         {},
     ),
@@ -729,10 +739,12 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
         "does age relate to icome",
         {
             "goal": "association",
-            "variables": {},
+            "variables": {"x": "age", "y": "income"},
             "design": "unknown",
-            "needs_clarification": True,
-            "note": "typo of 'income'; same judgment call as the first item",
+            "needs_clarification": False,
+            "expected_correction": "Using `income` (you wrote 'icome')",
+            "note": "'icome' resolves unambiguously to 'income'; association has no design concept, so "
+            "nothing else is left to ask once the column is corrected",
         },
         {},
     ),
@@ -743,7 +755,8 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
             "variables": {},
             "design": "unknown",
             "needs_clarification": True,
-            "note": "'slaary' resembles no real column closely enough to assume 'income'",
+            "note": "'slaary' matches nothing in the column universe above the floor threshold; "
+            "InvalidSpecError, same reasoning as 'revenue' above",
         },
         {},
     ),
@@ -751,10 +764,11 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
         "check the weit column for outliers",
         {
             "goal": "outliers",
-            "variables": {},
+            "variables": {"outcome": "weight"},
             "design": "unknown",
-            "needs_clarification": True,
-            "note": "'weit' is a typo of 'weight', but a fuzzy match is still a guess, not a read",
+            "needs_clarification": False,
+            "expected_correction": "Using `weight` (you wrote 'weit')",
+            "note": "'weit' resolves unambiguously to 'weight'; outliers has no design concept",
         },
         {},
     ),
@@ -762,10 +776,11 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
         "summarize the icnome column",
         {
             "goal": "describe",
-            "variables": {},
+            "variables": {"outcome": "income"},
             "design": "unknown",
-            "needs_clarification": True,
-            "note": "typo of 'income'",
+            "needs_clarification": False,
+            "expected_correction": "Using `income` (you wrote 'icnome')",
+            "note": "'icnome' resolves unambiguously to 'income'; describe has no design concept",
         },
         {},
     ),
@@ -776,7 +791,8 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
             "variables": {},
             "design": "unknown",
             "needs_clarification": True,
-            "note": "neither 'bonus' nor 'performance' is a column in this dataset",
+            "note": "neither 'bonus' nor 'performance' matches anything in the column universe above "
+            "the floor threshold; InvalidSpecError on whichever role is checked first",
         },
         {},
     ),
@@ -787,7 +803,7 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
             "variables": {},
             "design": "unknown",
             "needs_clarification": True,
-            "note": "typo/near-miss of a column that may not even exist",
+            "note": "'sallary' matches nothing above the floor threshold; InvalidSpecError",
         },
         {},
     ),
@@ -795,10 +811,11 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
         "should we transform the icome variable",
         {
             "goal": "transform",
-            "variables": {},
+            "variables": {"outcome": "income"},
             "design": "unknown",
-            "needs_clarification": True,
-            "note": "typo of 'income'",
+            "needs_clarification": False,
+            "expected_correction": "Using `income` (you wrote 'icome')",
+            "note": "'icome' resolves unambiguously to 'income'; transform has no design concept",
         },
         {},
     ),
@@ -806,11 +823,13 @@ REALISTIC_QUESTION_SPEC_ITEMS: list[Item] = [
         "compare test scores by depatment",
         {
             "goal": "compare_groups",
-            "variables": {},
+            "variables": {"outcome": "test_score", "group": "department"},
             "design": "unknown",
             "needs_clarification": True,
-            "note": "'test scores' (spaced/plural) and 'depatment' (typo) don't match column names exactly; "
-            "whether to normalize such near-misses is a product decision, not assumed here",
+            "expected_correction": "Using `test_score` (you wrote 'test scores'); "
+            "using `department` (you wrote 'depatment')",
+            "note": "both near-misses resolve unambiguously (match_column tolerates the space/typo); "
+            "needs_clarification stays True because design is still unstated, not because of the columns",
         },
         {},
     ),

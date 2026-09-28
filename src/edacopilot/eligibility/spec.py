@@ -28,6 +28,8 @@ from edacore.assumptions import check_design_crossing
 from edacore.contracts import CheckStatus, SemanticType
 from edacore.profiling import detect_structure, infer_semantic_types
 
+from .column_matching import ColumnMatchConfig, match_column
+
 
 class Goal(StrEnum):
     DESCRIBE = "describe"
@@ -69,6 +71,19 @@ class QuestionSpec(BaseModel):
     user_text: str = ""
     confirmed_by_user: set[str] = Field(default_factory=set)
     ambiguities: list[str] = Field(default_factory=list)
+    # A visible note per column name validate_spec corrected via fuzzy
+    # matching (Section 7.1's column-resolution step), e.g. "Using
+    # `income` (you wrote 'icnome')". Never silent: a correction the user
+    # never sees is a correction they can't catch if it's wrong.
+    column_corrections: list[str] = Field(default_factory=list)
+    # Set (role -> ranked candidate columns) iff `ambiguities` came from
+    # unresolved column names rather than the design cross-check --
+    # structured, so the orchestrator can render one button per candidate
+    # instead of parsing them back out of the English sentence in
+    # `ambiguities`. The two kinds of ambiguity are never mixed in one
+    # `validate_spec` call (see that function's docstring), so a non-empty
+    # dict here means every entry in `ambiguities` is a column ambiguity.
+    column_ambiguity_candidates: dict[str, list[str]] = Field(default_factory=dict)
 
     @field_serializer("confirmed_by_user")
     def _sorted_confirmations(self, confirmed: set[str]) -> list[str]:
@@ -257,14 +272,58 @@ def _numeric_coded_ordinal(series: pd.Series, semantic_type: SemanticType) -> bo
     return semantic_type is SemanticType.ORDINAL and pd.api.types.is_numeric_dtype(series)
 
 
-def validate_spec(spec: QuestionSpec, df: pd.DataFrame) -> QuestionSpec:
+def _resolve_columns(
+    spec: QuestionSpec, df: pd.DataFrame, config: ColumnMatchConfig
+) -> tuple[dict[str, str], list[str], list[str], dict[str, list[str]]]:
+    """Section 7.1's column-resolution step: fuzzy-match any named column
+    that isn't actually in `df` (`column_matching.py`), before anything
+    else runs.
+
+    Returns `(resolved_variables, corrections, ambiguities, candidates)`.
+    `candidates` maps each still-ambiguous role to its ranked candidate
+    columns, for the orchestrator to render as buttons. Raises
+    `InvalidSpecError` immediately for a name with no plausible column at
+    all -- that is still a spec-building bug, never a question to ask.
+    """
+    columns = list(df.columns)
+    resolved = dict(spec.variables)
+    corrections: list[str] = []
+    ambiguities: list[str] = []
+    candidates: dict[str, list[str]] = {}
+    for role, name in spec.variables.items():
+        if name in columns:
+            continue
+        match = match_column(name, columns, config)
+        if match.resolved is not None:
+            resolved[role] = match.resolved
+            corrections.append(match.correction or "")
+        elif match.candidates:
+            ambiguities.append(
+                f"'{name}' is not a column in the data. Did you mean one of: "
+                f"{', '.join(f'`{c}`' for c in match.candidates)}?"
+            )
+            candidates[role] = match.candidates
+        else:
+            raise InvalidSpecError(
+                f"columns named in the question are not in the data: {{'{role}': '{name}'}}"
+            )
+    return resolved, corrections, ambiguities, candidates
+
+
+def validate_spec(
+    spec: QuestionSpec, df: pd.DataFrame, column_matching: ColumnMatchConfig | None = None
+) -> QuestionSpec:
     """Validate `spec` against `df` and return a copy carrying `ambiguities`.
 
     Raises `InvalidSpecError` for problems the user cannot resolve by
-    answering a question (a missing column, a missing required role, a
-    grouping column with fewer than two levels). Everything else becomes an
-    ambiguity, and `select_candidates` will refuse to run until they are
-    resolved.
+    answering a question (a column with no plausible match at all, a
+    missing required role, a grouping column with fewer than two levels).
+    Everything else becomes an ambiguity, and `select_candidates` will
+    refuse to run until they are resolved.
+
+    `column_matching` carries the fuzzy-match thresholds (Section 10.2's
+    `[column_matching]` config table); the default is the same one a
+    caller gets by passing nothing.
     """
     missing_roles = [role for role in _REQUIRED_ROLES[spec.goal] if not spec.variables.get(role)]
     if missing_roles:
@@ -272,9 +331,22 @@ def validate_spec(spec: QuestionSpec, df: pd.DataFrame) -> QuestionSpec:
             f"goal '{spec.goal.value}' needs {_REQUIRED_ROLES[spec.goal]}; missing: {missing_roles}"
         )
 
-    unknown = {role: col for role, col in spec.variables.items() if col not in df.columns}
-    if unknown:
-        raise InvalidSpecError(f"columns named in the question are not in the data: {unknown}")
+    resolved_variables, corrections, column_ambiguities, column_candidates = _resolve_columns(
+        spec, df, column_matching or ColumnMatchConfig()
+    )
+    if column_ambiguities:
+        # A role's column is still unresolved -- the design/type/group
+        # checks below all assume a real column to look at, so there is
+        # nothing more to check until this is answered.
+        return spec.model_copy(
+            update={
+                "ambiguities": column_ambiguities,
+                "column_ambiguity_candidates": column_candidates,
+            }
+        )
+    spec = spec.model_copy(
+        update={"variables": resolved_variables, "column_corrections": corrections}
+    )
 
     ambiguities: list[str] = []
     group = spec.variables.get("group")
@@ -312,4 +384,5 @@ def describe_spec(spec: QuestionSpec) -> dict[str, Any]:
         "alpha": spec.alpha,
         "confirmed_by_user": sorted(spec.confirmed_by_user),
         "ambiguities": list(spec.ambiguities),
+        "column_corrections": list(spec.column_corrections),
     }

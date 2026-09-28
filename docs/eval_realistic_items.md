@@ -585,72 +585,78 @@ Every hand-written realistic item in both eval sets -- 80 intent, 80 QuestionSpe
 ### #157
 
 **Input:** `is icnome different by gender`
-**Label:** `{'goal': 'compare_groups', 'variables': {}, 'design': 'unknown'}`
+**Label:** `{'goal': 'compare_groups', 'variables': {'outcome': 'income', 'group': 'gender'}, 'design': 'unknown'}`
 **Needs clarification:** yes
-**Note:** 'icnome' is a typo of 'income'; whether to silently correct common typos or ask is an open product decision -- the safe label here is to ask, not guess
+**Expected correction note:** Using `income` (you wrote 'icnome')
+**Note:** 'icnome' resolves unambiguously to 'income' (match_column, default thresholds); needs_clarification stays True for a different reason now -- design is still unstated
 
 ### #158
 
 **Input:** `compare revenue across regions`
 **Label:** `{'goal': 'compare_groups', 'variables': {}, 'design': 'unknown'}`
 **Needs clarification:** yes
-**Note:** 'revenue' is not a column in this dataset; must not be silently mapped to 'income'
+**Note:** 'revenue' matches nothing in the column universe above the floor threshold; validate_spec raises InvalidSpecError here, not an ambiguity -- nothing plausible to offer
 
 ### #159
 
 **Input:** `does age relate to icome`
-**Label:** `{'goal': 'association', 'variables': {}, 'design': 'unknown'}`
-**Needs clarification:** yes
-**Note:** typo of 'income'; same judgment call as the first item
+**Label:** `{'goal': 'association', 'variables': {'x': 'age', 'y': 'income'}, 'design': 'unknown'}`
+**Needs clarification:** no
+**Expected correction note:** Using `income` (you wrote 'icome')
+**Note:** 'icome' resolves unambiguously to 'income'; association has no design concept, so nothing else is left to ask once the column is corrected
 
 ### #160
 
 **Input:** `is there a difference in slaary by department`
 **Label:** `{'goal': 'compare_groups', 'variables': {}, 'design': 'unknown'}`
 **Needs clarification:** yes
-**Note:** 'slaary' resembles no real column closely enough to assume 'income'
+**Note:** 'slaary' matches nothing in the column universe above the floor threshold; InvalidSpecError, same reasoning as 'revenue' above
 
 ### #161
 
 **Input:** `check the weit column for outliers`
-**Label:** `{'goal': 'outliers', 'variables': {}, 'design': 'unknown'}`
-**Needs clarification:** yes
-**Note:** 'weit' is a typo of 'weight', but a fuzzy match is still a guess, not a read
+**Label:** `{'goal': 'outliers', 'variables': {'outcome': 'weight'}, 'design': 'unknown'}`
+**Needs clarification:** no
+**Expected correction note:** Using `weight` (you wrote 'weit')
+**Note:** 'weit' resolves unambiguously to 'weight'; outliers has no design concept
 
 ### #162
 
 **Input:** `summarize the icnome column`
-**Label:** `{'goal': 'describe', 'variables': {}, 'design': 'unknown'}`
-**Needs clarification:** yes
-**Note:** typo of 'income'
+**Label:** `{'goal': 'describe', 'variables': {'outcome': 'income'}, 'design': 'unknown'}`
+**Needs clarification:** no
+**Expected correction note:** Using `income` (you wrote 'icnome')
+**Note:** 'icnome' resolves unambiguously to 'income'; describe has no design concept
 
 ### #163
 
 **Input:** `is bonus related to performance`
 **Label:** `{'goal': 'association', 'variables': {}, 'design': 'unknown'}`
 **Needs clarification:** yes
-**Note:** neither 'bonus' nor 'performance' is a column in this dataset
+**Note:** neither 'bonus' nor 'performance' matches anything in the column universe above the floor threshold; InvalidSpecError on whichever role is checked first
 
 ### #164
 
 **Input:** `why is the sallary column missing so much data`
 **Label:** `{'goal': 'missingness', 'variables': {}, 'design': 'unknown'}`
 **Needs clarification:** yes
-**Note:** typo/near-miss of a column that may not even exist
+**Note:** 'sallary' matches nothing above the floor threshold; InvalidSpecError
 
 ### #165
 
 **Input:** `should we transform the icome variable`
-**Label:** `{'goal': 'transform', 'variables': {}, 'design': 'unknown'}`
-**Needs clarification:** yes
-**Note:** typo of 'income'
+**Label:** `{'goal': 'transform', 'variables': {'outcome': 'income'}, 'design': 'unknown'}`
+**Needs clarification:** no
+**Expected correction note:** Using `income` (you wrote 'icome')
+**Note:** 'icome' resolves unambiguously to 'income'; transform has no design concept
 
 ### #166
 
 **Input:** `compare test scores by depatment`
-**Label:** `{'goal': 'compare_groups', 'variables': {}, 'design': 'unknown'}`
+**Label:** `{'goal': 'compare_groups', 'variables': {'outcome': 'test_score', 'group': 'department'}, 'design': 'unknown'}`
 **Needs clarification:** yes
-**Note:** 'test scores' (spaced/plural) and 'depatment' (typo) don't match column names exactly; whether to normalize such near-misses is a product decision, not assumed here
+**Expected correction note:** Using `test_score` (you wrote 'test scores'); using `department` (you wrote 'depatment')
+**Note:** both near-misses resolve unambiguously (match_column tolerates the space/typo); needs_clarification stays True because design is still unstated, not because of the columns
 
 ### #167
 

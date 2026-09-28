@@ -902,9 +902,28 @@ Implemented in `edacopilot/eligibility/spec.py`. `validate_spec(spec, df)`
 returns a copy carrying `ambiguities`; `select_candidates` raises
 `AmbiguousSpecError` if any remain, so step 3 below is enforced rather than
 merely expected of the orchestrator. Problems the user cannot resolve by
-answering a question — a column that does not exist, a missing required
-role, a grouping column with one level — raise `InvalidSpecError` instead:
-those are spec-building bugs, not questions.
+answering a question — a missing required role, a grouping column with one
+level, a named column with no plausible match at all — raise
+`InvalidSpecError` instead: those are spec-building bugs, not questions.
+
+**Column names are resolved before anything else (M9.2)**, deterministically,
+never by the LLM: a name the LLM (or the form fallback) wrote that is not
+actually in `df.columns` is fuzzy-matched against the real ones
+(`eligibility/column_matching.py`, stdlib `difflib` — evaluated against
+`rapidfuzz` and found to already clear the bar, so no new dependency).
+Three thresholds (`[column_matching]` in Section 10.2's config, each
+overridable) decide the outcome:
+
+| Outcome | Condition | What happens |
+|---|---|---|
+| Corrected | one candidate ≥ `threshold`, no other within `margin` of it | `variables[role]` is silently *resolved* but never silently *used* — `column_corrections` carries a sentence ("Using `income` (you wrote 'icnome')") that the next card shows first, so a wrong guess is something to catch, not something that already happened |
+| Ambiguous | more than one candidate within `margin` of the best, or the best is between `floor` and `threshold` | an ambiguity, same as a design ambiguity — but with one button per candidate column instead of paired/independent, via `column_ambiguity_candidates` |
+| Invalid | nothing clears `floor` | `InvalidSpecError` — no plausible column exists, so there is nothing to ask about |
+
+The two kinds of ambiguity (design, column) are never produced by the same
+`validate_spec` call: a column ambiguity is checked first and, if any role
+has one, the function returns before the design/type checks run at all,
+since those all assume a real column to look at.
 
 **Validation (deterministic, before any test):**
 1. All named columns exist; types match the goal (e.g. `COMPARE_GROUPS` needs a grouping column with 2+ levels).
@@ -1391,6 +1410,13 @@ alias_column_names = false  # true in strict mode
 alpha = 0.05
 random_state = 42
 max_rows_for_exact = 5000
+
+# Section 7.1's fuzzy column-name resolution (M9.2). Defaults shown.
+[column_matching]
+threshold = 0.8       # a candidate at or above this, alone, is corrected silently (but visibly noted)
+margin = 0.15         # a second candidate within this of the best makes it ambiguous, not corrected
+floor = 0.5           # below this for every candidate, InvalidSpecError -- nothing plausible to ask about
+max_candidates = 3    # candidate buttons shown on an ambiguity card, at most
 ```
 Model names are examples; the maintainer sets current ones. `gemini/` and
 `ollama/` are LiteLLM provider prefixes read straight from `GEMINI_API_KEY`

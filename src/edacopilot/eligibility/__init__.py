@@ -16,6 +16,7 @@ eligibility is decided before any persona sees the question.
 from __future__ import annotations
 
 from .checks import CheckCache, ResolutionContext, resolve
+from .column_matching import ColumnMatch, ColumnMatchConfig, match_column
 from .engine import CandidateSet, select_candidates
 from .rules import RULES, UnsupportedQuestionError
 from .spec import (
@@ -35,6 +36,8 @@ __all__ = [
     "AmbiguousSpecError",
     "CandidateSet",
     "CheckCache",
+    "ColumnMatch",
+    "ColumnMatchConfig",
     "Design",
     "Goal",
     "InvalidSpecError",
@@ -42,6 +45,7 @@ __all__ = [
     "ResolutionContext",
     "UnsupportedQuestionError",
     "describe_spec",
+    "match_column",
     "require_resolved",
     "resolve",
     "subject_column",

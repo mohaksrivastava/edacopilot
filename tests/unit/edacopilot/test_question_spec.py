@@ -14,6 +14,7 @@ import pytest
 
 from edacopilot.eligibility import (
     AmbiguousSpecError,
+    ColumnMatchConfig,
     Design,
     Goal,
     InvalidSpecError,
@@ -53,9 +54,11 @@ def _spec(**overrides: object) -> QuestionSpec:
 # --------------------------------------------------------------------------
 
 
-def test_unknown_column_is_an_error_not_a_question() -> None:
-    """A column that does not exist is a spec-building bug. Asking the user
-    about it would be asking them to debug the system."""
+def test_unknown_column_with_no_plausible_match_is_an_error_not_a_question() -> None:
+    """A column with nothing even fuzzy-close to it is a spec-building bug
+    (M9.2: the fuzzy-match step tried first and found nothing above its
+    floor). Asking the user to pick from candidates that aren't
+    plausible would be asking them to debug the system."""
     df = _independent()
     with pytest.raises(InvalidSpecError, match="not in the data"):
         validate_spec(_spec(variables={"outcome": "nope", "group": "group"}), df)
@@ -204,3 +207,81 @@ def test_describe_spec_is_json_ready() -> None:
     assert described["goal"] == "compare_groups"
     assert described["design"] == "independent"
     assert described["confirmed_by_user"] == ["design"]
+    assert described["column_corrections"] == []
+
+
+# --------------------------------------------------------------------------
+# M9.2: column-name resolution (Section 7.1's fuzzy-match step)
+# --------------------------------------------------------------------------
+
+
+def _income_df() -> pd.DataFrame:
+    rng = np.random.default_rng(5)
+    income = rng.lognormal(10, 0.6, 80)
+    return pd.DataFrame(
+        {
+            "income": income,
+            "income_log": np.log(income),
+            "gender": ["F"] * 40 + ["M"] * 40,
+        }
+    )
+
+
+def test_a_clear_typo_is_corrected_with_a_visible_note() -> None:
+    df = _income_df()
+    spec = _spec(variables={"outcome": "icnome", "group": "gender"})
+    validated = validate_spec(spec, df)
+
+    assert validated.ambiguities == []
+    assert validated.variables["outcome"] == "income"
+    assert validated.column_corrections == ["Using `income` (you wrote 'icnome')"]
+
+
+def test_income_vs_income_log_is_an_ambiguity_not_a_guess() -> None:
+    """The exact case the maintainer asked to be tested by name: two
+    columns close enough to each other that picking one would be a
+    guess, not a read of the text."""
+    df = _income_df()
+    spec = _spec(variables={"outcome": "income_l", "group": "gender"})
+    validated = validate_spec(spec, df)
+
+    assert validated.column_corrections == []
+    assert len(validated.ambiguities) == 1
+    assert set(validated.column_ambiguity_candidates["outcome"]) == {"income", "income_log"}
+
+
+def test_a_confident_typo_still_resolves_next_to_a_similar_column() -> None:
+    """The other half of the income/income_log pairing: a typo close
+    enough to one of them and far enough from the other still resolves,
+    rather than every typo near either column becoming ambiguous."""
+    df = _income_df()
+    spec = _spec(variables={"outcome": "incme", "group": "gender"})
+    validated = validate_spec(spec, df)
+
+    assert validated.variables["outcome"] == "income"
+    assert validated.ambiguities == []
+
+
+def test_column_ambiguity_and_design_ambiguity_are_never_mixed() -> None:
+    """When a column is unresolved, the design cross-check never runs --
+    it needs a real column to check, so the ambiguities list returned is
+    only ever the column one, not both at once."""
+    df = paired_as_independent()
+    spec = QuestionSpec(
+        goal=Goal.COMPARE_GROUPS,
+        variables={"outcome": "score", "group": "cond", "subject": "subject_id"},
+        design=Design.INDEPENDENT,
+    )
+    validated = validate_spec(spec, df)
+
+    assert len(validated.ambiguities) == 1
+    assert validated.column_ambiguity_candidates  # the column ambiguity, and only it
+
+
+def test_thresholds_are_configurable_through_validate_spec() -> None:
+    df = _income_df()
+    spec = _spec(variables={"outcome": "gendre", "group": "gender"})
+    # A high enough threshold turns a would-be correction into an ambiguity.
+    validated = validate_spec(spec, df, ColumnMatchConfig(threshold=0.99))
+    assert validated.column_corrections == []
+    assert validated.column_ambiguity_candidates

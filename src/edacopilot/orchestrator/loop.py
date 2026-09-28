@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 from edacopilot.eligibility import (
     AmbiguousSpecError,
     CandidateSet,
+    ColumnMatchConfig,
     Design,
     Goal,
     InvalidSpecError,
@@ -367,7 +368,7 @@ class Orchestrator:
         self.state.pending_override = None
 
         try:
-            validated = validate_spec(spec, self.session.data)
+            validated = validate_spec(spec, self.session.data, self._column_matching_config())
         except InvalidSpecError as exc:
             return Card(
                 kind="warning",
@@ -381,9 +382,14 @@ class Orchestrator:
 
         if validated.ambiguities:
             # Section 7.1 step 3, and the invariant that matters most here:
-            # this returns *before* any persona is consulted.
+            # this returns *before* any persona is consulted. A column
+            # ambiguity (Section 7.1's fuzzy-match step) renders candidate
+            # buttons; a design ambiguity renders the paired/independent
+            # choice -- `column_ambiguity_candidates` tells the two apart
+            # (validate_spec never mixes them in one call).
+            kind = "column" if validated.column_ambiguity_candidates else "design"
             self.state.open_question = OpenQuestion(
-                spec=validated, ambiguities=list(validated.ambiguities), kind="design"
+                spec=validated, ambiguities=list(validated.ambiguities), kind=kind
             )
             return self._question_card(validated)
 
@@ -403,10 +409,28 @@ class Orchestrator:
 
         verdict = propose_with_rationales(candidates)
         self.state.pending = Pending(spec=validated, candidates=candidates, verdict=verdict)
-        return self._proposal_card(self.state.pending)
+        card = self._proposal_card(self.state.pending)
+        return _with_corrections(card, validated)
+
+    def _column_matching_config(self) -> ColumnMatchConfig:
+        """Section 10.2's `[column_matching]` table, read the same
+        ad-hoc way `plot_all_diagnostics` already is -- a plain dict on
+        `session.config`, no dedicated settings object for something this
+        small."""
+        overrides = self.session.config.get("column_matching", {})
+        return ColumnMatchConfig(**overrides)
 
     def _question_card(self, spec: QuestionSpec) -> Card:
-        """Section 7.1's ambiguities, as the question that blocks the turn."""
+        """Section 7.1's ambiguities, as the question that blocks the turn.
+
+        Two distinct kinds share this one card: a design ambiguity offers
+        the paired/independent choice; a column ambiguity (the fuzzy-match
+        step) offers one button per candidate column, keyed off
+        `column_ambiguity_candidates` set by `validate_spec`.
+        """
+        if spec.column_ambiguity_candidates:
+            return self._column_question_card(spec)
+
         lines = [
             "Before any method can be proposed, this needs an answer. "
             "The design is the single most consequential choice in a group comparison: "
@@ -434,6 +458,34 @@ class Orchestrator:
         return Card(
             kind="question",
             title="One question first",
+            stage=self.state.stage.value,
+            body_md="\n".join(lines),
+            actions=actions,
+        )
+
+    def _column_question_card(self, spec: QuestionSpec) -> Card:
+        """A named column had no confident match: one button per candidate,
+        per role. Picking one answers the same way a design choice does --
+        `_answer_intent` already sets `spec.variables[role]` from a
+        keyword payload naming that role, so a candidate button is just
+        `button(ANSWER_CLARIFICATION, **{role: candidate})`, nothing new."""
+        lines = [
+            "Before any method can be proposed, this needs an answer.",
+            "",
+        ]
+        lines += [f"- {question}" for question in spec.ambiguities]
+        actions = [
+            ActionButton(
+                label=f"{role}: use `{candidate}`",
+                intent=button(IntentType.ANSWER_CLARIFICATION, **{role: candidate}),
+                call=f'session.answer({role}="{candidate}")',
+            )
+            for role, candidates in spec.column_ambiguity_candidates.items()
+            for candidate in candidates
+        ]
+        return Card(
+            kind="question",
+            title="Which column did you mean?",
             stage=self.state.stage.value,
             body_md="\n".join(lines),
             actions=actions,
@@ -1418,6 +1470,21 @@ class Orchestrator:
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
+
+
+def _with_corrections(card: Card, spec: QuestionSpec) -> Card:
+    """Prepend Section 7.1's column-correction notes to a card's body.
+
+    Never silent (the module docstring on `column_matching.py` says why):
+    a fuzzy-matched column name is corrected automatically, but the
+    correction is the first thing on the card that follows, not something
+    folded invisibly into the proposal.
+    """
+    if not spec.column_corrections:
+        return card
+    notes = "\n".join(f"*{note}*" for note in spec.column_corrections)
+    body = f"{notes}\n\n{card.body_md}" if card.body_md else notes
+    return card.model_copy(update={"body_md": body})
 
 
 def _proposal_views(
