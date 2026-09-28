@@ -1892,6 +1892,29 @@ whenever Section 6 grows.
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
 
+### 2026-09-28 — M9.1 (tag `m9.1`)
+Two small fixes against the now-pushed `m9`, plus repo-wide secret
+scanning.
+
+- **`examples/m8_demo.ipynb`'s `deterministic_mode` moved into one
+  settings cell.** It was previously inlined into both `eda.start(...)`
+  calls' `config=` argument, correct but easy to miss and awkward to flip
+  for someone who wants to see the notebook's live-LLM rationales
+  instead. A `## Settings` cell near the top now sets
+  `DETERMINISTIC_MODE = True` with a comment on what changing it to
+  `False` needs (an API key in the environment) and a note that the
+  version this repository's own test executes always runs with it `True`
+  regardless of that cell's value having any local override -- the CI
+  notebook test reads the committed notebook, not a locally edited copy.
+- **`gitleaks` added to `.pre-commit-config.yaml` and to CI** (a new
+  `secrets` job, `ci.yml`), fetched from its own release binary rather
+  than the `gitleaks-action` marketplace action, which needs a license
+  key for private repositories where the direct binary does not. The
+  pre-commit hook scans staged changes before a commit; the CI job scans
+  the full history (`gitleaks git`, `fetch-depth: 0`) on every push and
+  PR, so a hook a contributor bypassed or never installed is not the only
+  thing standing between a committed secret and a merge.
+
 ### 2026-09-28 — M9 (tag `m9`)
 The LLM layer (Sections 3.4, 10, 11): `LLMClient` over LiteLLM, structured
 output for all seven calls, the fact-check, and the `ContextBuilder` --
