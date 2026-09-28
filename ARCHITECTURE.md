@@ -1371,12 +1371,17 @@ to prevent.
 ### 10.2 Config (`edacopilot.toml` or `start(...)` kwargs)
 ```toml
 [llm]
-default_model = "anthropic/claude-haiku-4-5"
-rationale_model = "anthropic/claude-sonnet-5"   # optional per-call override
-# local example:
-# default_model = "ollama/qwen2.5:7b-instruct"
-# api_base = "http://localhost:11434"
+default_model = "gemini/gemini-3.8-flash"
+rationale_model = "gemini/gemini-3.8-flash"   # optional per-call override
 deterministic_mode = false
+
+# A named alternative provider profile. Switching to it -- for local use,
+# or back to a different hosted provider -- is `active_profile = "ollama"`
+# below, never a code change (Section 1.3's "provider-agnostic" principle).
+[llm.profiles.ollama]
+default_model = "ollama/qwen2.5:7b-instruct"
+api_base = "http://localhost:11434"
+# active_profile = "ollama"   # uncomment to switch, config-only
 
 [privacy]
 level = "standard"          # "strict" | "standard"
@@ -1387,7 +1392,10 @@ alpha = 0.05
 random_state = 42
 max_rows_for_exact = 5000
 ```
-Model names are examples; the maintainer sets current ones.
+Model names are examples; the maintainer sets current ones. `gemini/` and
+`ollama/` are LiteLLM provider prefixes read straight from `GEMINI_API_KEY`
+and a local `api_base` respectively -- see Section 18's M9 entry for why
+Gemini, not Anthropic, is the shipped default.
 
 ### 10.3 Prompt templates (`llm/prompts/*.md`)
 One file per call. Each template has: role statement, hard rules, the JSON schema, 2–3 few-shot examples, and a slot for the context block. Shared hard rules included in every template:
@@ -1883,6 +1891,120 @@ whenever Section 6 grows.
 
 Newest first. One entry per milestone (or per round of fixes against an
 already-"complete" milestone); each links back to its git tag.
+
+### 2026-09-28 — M9 (tag `m9`)
+The LLM layer (Sections 3.4, 10, 11): `LLMClient` over LiteLLM, structured
+output for all seven calls, the fact-check, and the `ContextBuilder` --
+the first code in this repository that can call a model at all.
+
+- **Provider switched from Anthropic to Google Gemini**, a maintainer
+  decision made mid-milestone, not a spec default: `GEMINI_API_KEY`
+  replaces `ANTHROPIC_API_KEY`, and `gemini/gemini-3.8-flash` (LiteLLM's
+  `gemini/` prefix, which reads the key directly) replaces
+  `anthropic/claude-haiku-4-5` as `default_model`. `gemini-3.8-flash` was
+  chosen because it is the model Google's own model-listing page banners
+  as newly released and recommends for new production use at the time of
+  this change -- confirmed by fetching that page's raw HTML rather than
+  trusting a summarized digest of it, since a summarizer with no real
+  knowledge of a future date is exactly where a plausible-sounding but
+  invented model name would slip through unnoticed. Ollama
+  (`ollama/qwen2.5:7b-instruct`) remains a config profile, wired and unit
+  tested; it was not exercised live this milestone because Ollama was
+  unreachable from the development machine at the time (WSL2 -> Windows
+  host networking). Switching provider is `active_profile` or
+  `default_model` in `edacopilot.toml` -- Section 10.2's table now shows
+  Gemini as the default and Ollama as the profile example.
+- **`tenacity` is now a direct dependency**, not treated as transitive.
+  LiteLLM's own `num_retries` kwarg (Section 10.1's "retries (2,
+  exponential backoff)") wraps the call in a `tenacity.Retrying` at call
+  time and raises `ImportError` if `tenacity` is not importable -- found
+  by an unmocked smoke call during development that failed for exactly
+  this reason. That call could not be confirmed not to have reached the
+  network before failing, which is the reason the next point exists.
+- **A suite-wide safety net: `litellm.completion` is patched to raise in
+  every test by default** (`tests/conftest.py`, autouse). M7 and M8's
+  entire test suite predates the LLM layer and calls
+  `session.ask("free text")` throughout on the assumption that nothing
+  reaches a network; M9 makes that call path capable of reaching one for
+  the first time. Patching it to raise means every such call falls
+  through to `LLMFallbackRequired` and Section 10.5's deterministic
+  path -- the same behaviour those tests already asserted -- rather than
+  either attempting a real call or requiring hundreds of pre-existing
+  tests to be individually rewritten. A test exercising the LLM path
+  re-patches `litellm.completion` itself for its own scope.
+- **That net does not reach a subprocess.** `examples/m8_demo.ipynb`
+  (m8.1) executes in its own Jupyter kernel via `nbclient`, and
+  `scripts/generate_transcripts.py` runs `tests/conversations/`'s
+  transcripts as a standalone script -- both outside pytest, so a
+  monkeypatch in the test process has no effect on either. Both call
+  `session.ask("free text")` somewhere (a post-hoc proposal, in both
+  cases), which is exactly the path M9 wired to try a live model first.
+  Both now set `config={"llm": {"deterministic_mode": True}}` explicitly
+  at session creation (the notebook's own cells; `Transcript.start` for
+  every golden transcript), rather than relying on the pytest-only net.
+  Caught by an unmocked run of the notebook test before it was fixed --
+  the fix and this note both belong to closing M9's own gap, not to
+  m8.1's original tag.
+- **That net does not reach a subprocess.** `examples/m8_demo.ipynb`
+  (m8.1) executes in its own Jupyter kernel via `nbclient`, and
+  `scripts/generate_transcripts.py` runs `tests/conversations/`'s
+  transcripts as a standalone script -- both outside pytest, so a
+  monkeypatch in the test process has no effect on either. Both call
+  `session.ask("free text")` somewhere (a post-hoc proposal, in both
+  cases), which is exactly the path M9 wired to try a live model first.
+  Both now set `config={"llm": {"deterministic_mode": True}}` explicitly
+  at session creation (the notebook's own cells;
+  `Transcript.start` for every golden transcript), rather than relying on
+  the pytest-only net. Caught by an unmocked run of the notebook test
+  before it was fixed -- the fix and this note both belong to closing
+  M9's own gap, not to m8.1's original tag.
+- **`LLMClient.complete_structured`** (`llm/client.py`): one retry with
+  the validation error appended on a schema failure (Section 10.1); any
+  other failure -- timeout, malformed JSON twice, deterministic_mode on,
+  the provider unreachable -- raises `LLMFallbackRequired` rather than
+  propagating, which is the single seam every one of the seven calls
+  relies on to keep rule 9 true without duplicating a try/except at each
+  call site.
+- **`write_rationale`'s second failure mode is Section 8.4's fact-check**
+  (`llm/factcheck.py`), not a schema violation: valid JSON, valid shape,
+  but a number, a `fact_id`, or a method name that does not trace back to
+  what the model was actually given. One retry with the fact-check's own
+  failure message appended, then `LLMFallbackRequired` -- so a rationale
+  that passes the schema but fails to ground itself falls back to
+  `personas/rationale.py`'s templates exactly like a malformed one does.
+- **`ContextBuilder`** (`llm/context.py`) is the only path from session
+  data to a prompt. Building it surfaced one privacy bug worth recording:
+  a text-like column with (almost) all-unique values, if classified
+  NOMINAL/ORDINAL rather than TEXT by the profiler, would have had its
+  "top levels" computed and sent -- which for a column where every value
+  is essentially unique is almost every raw value, exactly what Section
+  11 says never leaves the session. Fixed by also checking the
+  profiler's own `high_cardinality` flag, not semantic type alone, before
+  computing top levels. A canary test (plant a unique string in a
+  free-text column, assert it never appears in a rendered prompt, both
+  privacy levels) is what caught it.
+- **Two calls' "deterministic fallback" already existed before this
+  milestone, just not in `llm/fallback.py`.** Section 10.5 lists five
+  fallbacks; `suggest_next_step` and `select_adhoc_function` were never
+  on that list because their deterministic behaviour predates the LLM
+  layer entirely -- `stage.next_suggestions`/`result_suggestions` and the
+  orchestrator's own keyword column-matcher (`_show`) respectively. Both
+  calls are implemented and unit tested in `llm/calls.py`; only
+  `parse_intent` and `build_question_spec` are wired live into the
+  orchestrator this milestone (Section 15.5 names these two specifically
+  as where a golden transcript's mocked LLM slots in), guarded by the
+  same fallback seam. `write_rationale`, `elicit_mnar`,
+  `answer_free_question`, `suggest_next_step` and `select_adhoc_function`
+  are complete and tested standalone, ready to wire into their stage call
+  sites as those stages' own milestones (M10-M13) touch them.
+- **`elicit_mnar` has no deterministic fallback at all yet** (Section
+  10.5 already says so: "arrives with the missingness stage in M10").
+  Without a working LLM, a caller has nothing to fall back to until then.
+- **Evals (Section 15.4) and `docs/sample_conversation_llm.md` are not
+  part of this tag.** Both require live, approved calls against a real
+  model and are run as a separate, explicitly approved step after `m9`
+  is tagged, per the standing rule that any paid-API call outside the
+  mocked test suite needs a go-ahead first.
 
 ### 2026-09-28 — M8.1 (tag `m8.1`)
 Four loose ends in the M8 deliverable, closed before M9 starts.

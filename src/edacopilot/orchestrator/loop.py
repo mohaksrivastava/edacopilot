@@ -206,6 +206,13 @@ class Orchestrator:
 
     def handle(self, intent: Intent) -> Card:
         """One turn (Section 3.2). Routing only — the work is in the handlers."""
+        text = str(intent.payload.get("text", ""))
+        self.session.record_turn("user", text)
+        card = self._route(intent)
+        self.session.record_turn("assistant", card.title)
+        return card
+
+    def _route(self, intent: Intent) -> Card:
         if not intent.is_confident:
             return self._clarify(intent)
 
@@ -299,8 +306,20 @@ class Orchestrator:
         if text is None:
             return self._form_card("Tell me what to compare")
 
-        intent = parse_intent(text, awaiting_answer=self.state.open_question is not None)
-        return self.handle(intent)
+        return self.handle(self._parse_intent(text))
+
+    def _parse_intent(self, text: str) -> Intent:
+        """Section 3.4's `parse_intent`: the LLM first, Section 10.5's
+        keyword parser as the fallback. One of the two calls Section
+        15.5 names as where a golden transcript's mocked LLM slots in."""
+        from edacopilot.llm.calls import parse_intent as parse_intent_llm
+        from edacopilot.llm.client import LLMFallbackRequired
+
+        awaiting_answer = self.state.open_question is not None
+        try:
+            return parse_intent_llm(text, self.session, awaiting_answer=awaiting_answer)
+        except LLMFallbackRequired:
+            return parse_intent(text, awaiting_answer=awaiting_answer)
 
     def _ask_intent(self, intent: Intent) -> Card:
         if intent.payload.get("post_hoc"):
@@ -310,11 +329,29 @@ class Orchestrator:
             for key, value in intent.payload.items()
             if key not in ("text", "post_hoc") and value is not None
         }
-        if not fields:
-            return self._form_card(
-                "I can see this is an analysis question, but not which columns it is about"
-            )
-        return self._propose(self._spec_from_fields(fields))
+        if fields:
+            return self._propose(self._spec_from_fields(fields))
+
+        text = str(intent.payload.get("text", ""))
+        spec = self._build_question_spec(text) if text else None
+        if spec is not None:
+            return self._propose(spec)
+        return self._form_card(
+            "I can see this is an analysis question, but not which columns it is about"
+        )
+
+    def _build_question_spec(self, text: str) -> QuestionSpec | None:
+        """Section 3.4's `build_question_spec`. `None` means no LLM
+        answered it -- the caller falls back to the form card, Section
+        10.5's own fallback for this call (a spec built without a model
+        would be a guess, so the fallback shows fields instead of one)."""
+        from edacopilot.llm.calls import build_question_spec
+        from edacopilot.llm.client import LLMFallbackRequired
+
+        try:
+            return build_question_spec(text, self.session)
+        except LLMFallbackRequired:
+            return None
 
     def _spec_from_fields(self, fields: dict[str, Any]) -> QuestionSpec:
         stage = self.hypothesis()

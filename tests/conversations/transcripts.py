@@ -63,7 +63,20 @@ class Transcript:
         return self.name
 
     def start(self, root: Path) -> Session:
-        return Session.start(self.data(), session_id=self.name, root=root)
+        """A deterministic-mode session (rule 9), explicitly.
+
+        pytest's own `conftest.py` blocks a live `litellm.completion` call
+        for anything run *through pytest*, but `scripts/generate_transcripts.py`
+        runs these same transcripts as a standalone script, outside pytest,
+        with no such net under it. Setting `deterministic_mode` here rather
+        than relying on that net makes "no LLM call anywhere" (this
+        module's own docstring) true regardless of how a transcript is
+        run, which is also just correct: M9 slotting a *mocked* LLM in at
+        parse_intent/build_question_spec (Section 15.5) is a different,
+        narrower thing than these transcripts running live.
+        """
+        config = {"llm": {"deterministic_mode": True}}
+        return Session.start(self.data(), session_id=self.name, root=root, config=config)
 
 
 # --------------------------------------------------------------------------

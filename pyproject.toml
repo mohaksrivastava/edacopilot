@@ -26,6 +26,11 @@ dependencies = [
   # real rather than a happy accident, and the min-versions CI leg pins it.
   "pyyaml>=6",
   "litellm",
+  # litellm's own num_retries kwarg (Section 10.1's "retries (2,
+  # exponential backoff)") wraps the call in a tenacity.Retrying at call
+  # time and raises if tenacity is not importable -- it was never actually
+  # transitive, unlike pyyaml above. Declared, not left implicit.
+  "tenacity",
   "matplotlib",
   "ipywidgets>=8",
   "ipython",

@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import inspect
 import json
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pandas as pd
@@ -42,6 +43,17 @@ from .dataset_store import DatasetStore, VersionRecord
 from .ledger import AdjustMethod, LedgerEntry, TestLedger, is_posthoc
 from .plots import PlotStore
 from .provenance import ProposalView, ProvenanceLog, Step
+
+if TYPE_CHECKING:
+    # Not a module-level import: edacopilot.llm's __init__ imports
+    # llm.fallback, which imports edacopilot.orchestrator.intents, which
+    # this module's own orchestrator.loop import must reach *first* for
+    # that chain to finish cleanly. A top-level `from edacopilot.llm...`
+    # here, ahead or behind, either races that or fights ruff's import
+    # sort into recreating the race -- so the real import is lazy, inside
+    # the `llm` property below, same as `Orchestrator.module()` does for
+    # its own cycle.
+    from edacopilot.llm.client import LLMClient
 
 SESSION_DIR = ".edacopilot"
 STATE_FILE = "session.json"
@@ -71,6 +83,16 @@ class Session:
     plot_store: PlotStore | None = None
     _turn_state: TurnState = field(default_factory=TurnState, repr=False)
     _orchestrator: Orchestrator | None = field(default=None, repr=False)
+    # Section 10.4's "last 6 conversational turns (text only)", for the
+    # ContextBuilder (M9). Transient like `TurnState`'s own scratch fields
+    # (see that class's docstring): a resumed session re-asks rather than
+    # having the LLM reason about turns from a context the user no longer
+    # has, so this is never persisted to session.json.
+    _turns: deque[tuple[str, str]] = field(default_factory=lambda: deque(maxlen=6), repr=False)
+    # Section 11: "keep a local copy of every outgoing prompt ... this log
+    # never leaves the machine." In-memory only, for the same reason.
+    _prompt_log: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    _llm_client: LLMClient | None = field(default=None, repr=False)
 
     # ---- lifecycle ------------------------------------------------------
 
@@ -379,6 +401,53 @@ class Session:
     def code(self) -> str:
         """The session as a runnable script (rule 7)."""
         return self.provenance.code()
+
+    # ---- LLM layer plumbing (Sections 10.4, 11) --------------------------
+
+    def record_turn(self, role: str, text: str) -> None:
+        """Append to the last-6-turns window the `ContextBuilder` reads.
+
+        Blank text is not a turn -- most button clicks carry no free text,
+        and an empty entry would just be padding the window with nothing.
+        """
+        if text.strip():
+            self._turns.append((role, text.strip()))
+
+    def recent_turns(self) -> list[tuple[str, str]]:
+        """Section 10.4's "last 6 conversational turns (text only)"."""
+        return list(self._turns)
+
+    def log_prompt(self, call: str, messages: list[dict[str, Any]], **meta: Any) -> None:
+        """Keep a local copy of an outgoing prompt (Section 11).
+
+        In-memory only, per-session, never written to `session.json` and
+        never sent anywhere else -- `llm_audit()` is the only reader.
+        """
+        self._prompt_log.append({"call": call, "messages": messages, **meta})
+
+    def llm_audit(self) -> list[dict[str, Any]]:
+        """Every prompt this session has sent, for the user to inspect."""
+        return list(self._prompt_log)
+
+    @property
+    def llm(self) -> LLMClient:
+        """This session's `LLMClient`, built once from `self.config`.
+
+        `self.config` is the same plain dict `start(..., config={...})`
+        already merges (Section 10.2): an `"llm"` and/or `"privacy"` key in
+        it override `edacopilot.toml`'s values exactly the way the rest of
+        `config` already overrides other defaults.
+        """
+        if self._llm_client is None:
+            from edacopilot.llm.client import LLMClient
+            from edacopilot.llm.config import load_config
+
+            overrides = {
+                "llm": self.config.get("llm", {}),
+                "privacy": self.config.get("privacy", {}),
+            }
+            self._llm_client = LLMClient(load_config(overrides).llm)
+        return self._llm_client
 
     def set_adjust_method(self, method: AdjustMethod) -> None:
         self.test_ledger.set_method(method)

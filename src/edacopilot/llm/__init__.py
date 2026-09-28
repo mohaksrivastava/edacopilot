@@ -1,9 +1,20 @@
 """The LLM layer (ARCHITECTURE.md, Section 10).
 
-Only Section 10.5's deterministic fallback exists in this build. The client,
-the prompt templates, the fact-check and the ContextBuilder arrive with M9;
-until then `deterministic_mode` is the only mode, which is rule 9 taken at
-its word rather than as an aspiration.
+`LLMClient` (`client.py`), the seven calls (`calls.py`), the prompt
+templates (`prompts/`), the fact-check (`factcheck.py`) and the
+`ContextBuilder` (`context.py`) all arrived with M9. This module's own
+`__all__` still only re-exports Section 10.5's deterministic fallback
+(`fallback.py`) -- the rest are imported by their submodule path, lazily,
+at each call site that needs them, the same way `Orchestrator.module()`
+already did for its own import cycle. Eagerly importing them here would
+recreate that cycle: `calls.py` reaches `edacopilot.orchestrator.intents`,
+and this package is itself first loaded *from inside*
+`edacopilot.orchestrator.loop`'s own module body.
+
+`deterministic_mode` is still exactly what rule 9 promises: with it on, or
+with no model reachable at all, every call in `calls.py` raises
+`LLMFallbackRequired` and its caller runs the same deterministic path this
+module provided before M9 existed.
 """
 
 from __future__ import annotations

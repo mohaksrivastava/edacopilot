@@ -200,9 +200,23 @@ class Panel:
         self.header.value = (
             f'<div style="font-weight:600">edacopilot · {self.name} · '
             f"branch: {self.session.active_branch} · {self.session.version} · "
-            f"stage: {self.session.stage.upper()}</div>"
+            f"stage: {self.session.stage.upper()} · {self._llm_indicator()}</div>"
         )
         self.tabs.children = tuple(self._stage_buttons())
+
+    def _llm_indicator(self) -> str:
+        """M9's on/off indicator (Section 3.4 / rule 9).
+
+        Reads `session.llm.config` rather than deciding anything itself --
+        the panel owns no logic (M8's own invariant), so this is a plain
+        reflection of a fact the session already computed, not a judgement
+        the UI makes.
+        """
+        config = self.session.llm.config
+        if config.deterministic_mode:
+            return "LLM: off (deterministic mode)"
+        model, _ = config.resolve("parse_intent")
+        return f"LLM: {model}"
 
     def _stage_buttons(self) -> list[widgets.Button]:
         """Stage tabs with visited state (Section 13.2).
