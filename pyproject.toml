@@ -70,6 +70,14 @@ extend-exclude = ["ARCHITECTURE.md"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# Hand-written natural-language eval items (typos, run-on phrasing, long
+# adversarial sentences by design) and the prose rule/pattern strings
+# documenting each template -- E501 here would be wrapping prose, not
+# code, and the wrap points would be arbitrary.
+"evals/realistic_items.py" = ["E501"]
+"evals/build_eval_sets.py" = ["E501"]
+
 [tool.mypy]
 # Higher than requires-python: numpy's bundled stubs use PEP 695 `type`
 # statements that mypy can only parse when targeting 3.12+, the minimum
